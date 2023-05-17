@@ -79,7 +79,6 @@ class LitVqaModel(pl.LightningModule):
         )
 
     def configure_optimizers(self):
-
         max_iter = None
 
         if int(self.config.get("max_epochs", -1)) > 0:

@@ -2,7 +2,11 @@ import json
 import os
 from collections import Counter, namedtuple
 
-from torch.utils.data import Dataset
+import torch
+from PIL import Image
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import DataLoader, Dataset
+from transformers import AutoImageProcessor, AutoTokenizer
 
 TextVqaSample = namedtuple(
     "TextVqaSample",
@@ -12,8 +16,35 @@ TextVqaSample = namedtuple(
 OcrInfo = namedtuple("OcrInfo", ["word", "w", "h", "x0", "y0", "x1", "y1"])
 
 
+def collate_batch(samples):
+    batch = {
+        "question": torch.stack([x["question"] for x in samples]),
+        "answer": torch.stack([x["answer"] for x in samples]),
+        "image": torch.stack([x["image"] for x in samples]),
+        # OCR # FIXME -- set pad value
+        "tok": pad_sequence([x["ocr"]["tok"] for x in samples]),
+        "x0": pad_sequence([x["ocr"]["x0"] for x in samples]),
+        "y0": pad_sequence([x["ocr"]["y0"] for x in samples]),
+        "x1": pad_sequence([x["ocr"]["x1"] for x in samples]),
+        "y1": pad_sequence([x["ocr"]["y1"] for x in samples]),
+        "w": pad_sequence([x["ocr"]["w"] for x in samples]),
+        "h": pad_sequence([x["ocr"]["h"] for x in samples]),
+    }
+
+    return batch
+
+
 class TextVqaDataset(Dataset):
-    def __init__(self, path: str = "data/TextVQA"):
+    def __init__(
+        self,
+        path: str = "data/TextVQA",
+        pretrained_vit: str = "google/vit-base-patch16-224",
+        pretrained_dec: str = "sshleifer/tiny-mbart",
+    ):
+        self.base_path = path
+        self.image_processor = AutoImageProcessor.from_pretrained(pretrained_vit)
+        self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+
         with open(os.path.join(path, "TextVQA_0.5.1_train.json"), "r") as f:
             data = json.load(f)
 
@@ -71,12 +102,67 @@ class TextVqaDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx) -> TextVqaSample:
-        return self.samples[idx]
+    def __getitem__(self, idx):
+        vqa_sample = self.samples[idx]
+
+        # Tokenize question and answer using the decoders tokenizer
+        question_tensor = self.decoder_tokenizer(
+            vqa_sample.question,
+            add_special_tokens=False,
+            return_tensors="pt",
+            max_length=128,  # TODO -- don't hardcode this
+            padding="max_length",
+        ).input_ids
+
+        answer_tensor = self.decoder_tokenizer(
+            vqa_sample.answer,
+            add_special_tokens=False,
+            return_tensors="pt",
+            max_length=128,  # TODO -- don't hardcode this
+            padding="max_length",
+        ).input_ids
+
+        # Preprocess the image
+        im = Image.open(
+            os.path.join(self.base_path, "train_images", f"{vqa_sample.image_id}.jpg")
+        )
+        im = im.convert("RGB")
+        image_tensor = self.image_processor(im, return_tensors="pt").pixel_values
+
+        # Prepare OCR Embedding input
+        tok_tensor = torch.LongTensor(
+            [0, 0, 0, 0, 0]
+        )  # TODO -- Figure out how vocab will work
+        x0_tensor = torch.LongTensor([x.x0 for x in vqa_sample.ocr_info])
+        y0_tensor = torch.LongTensor([x.y0 for x in vqa_sample.ocr_info])
+        x1_tensor = torch.LongTensor([x.x1 for x in vqa_sample.ocr_info])
+        y1_tensor = torch.LongTensor([x.y1 for x in vqa_sample.ocr_info])
+        w_tensor = torch.LongTensor([x.w for x in vqa_sample.ocr_info])
+        h_tensor = torch.LongTensor([x.h for x in vqa_sample.ocr_info])
+
+        return {
+            "question": question_tensor,
+            "answer": answer_tensor,
+            "image": image_tensor,
+            "ocr": {
+                "tok": tok_tensor,
+                "x0": x0_tensor,
+                "y0": y0_tensor,
+                "x1": x1_tensor,
+                "y1": y1_tensor,
+                "w": w_tensor,
+                "h": h_tensor,
+            },
+        }
 
 
 if __name__ == "__main__":
     ds = TextVqaDataset(
         path="/Users/charles/Projects/brew/brew-1146-vqa-research/data/TextVQA"
     )
-    print(ds[100])
+    sample = ds[100]
+    print(sample)
+
+    dl = DataLoader(ds, batch_size=5, shuffle=True, collate_fn=collate_batch)
+    for batch in dl:
+        print(batch)
