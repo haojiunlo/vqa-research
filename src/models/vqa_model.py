@@ -10,13 +10,11 @@ DEFAULT_PRETRAINED_LAYOUTLM = "microsoft/layoutlm-base-uncased"
 
 
 class VQAModel(torch.nn.Module):
-
     def __init__(self):
         super().__init__()
         self.img_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_VIT)
         self.ocr_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_LAYOUTLM)
-        self.decoder = AutoModelForCausalLM.from_pretrained(
-            DEFAULT_PRETRAINED_BART)
+        self.decoder = AutoModelForCausalLM.from_pretrained(DEFAULT_PRETRAINED_BART)
         self.enc_to_dec_proj = torch.nn.Sequential(
             torch.nn.Linear(
                 self.ocr_encoder.config.dim + self.img_encoder.config.hidden_size,
@@ -36,7 +34,9 @@ class VQAModel(torch.nn.Module):
     ):
         img_encoder_outputs = self.img_encoder(image_tensors)
         img_encoder_hidden_states = img_encoder_outputs[0]
-        ocr_encoder_outputs = self.ocr_encoder(ocr_text_tensors, bbox=bbox, attention_mask=ocr_text_attention_mask)
+        ocr_encoder_outputs = self.ocr_encoder(
+            ocr_text_tensors, bbox=bbox, attention_mask=ocr_text_attention_mask
+        )
         ocr_encoder_hidden_states = ocr_encoder_outputs[0]
 
         encoder_hidden_states = torch.concat(
@@ -67,11 +67,9 @@ if __name__ == "__main__":
     seq_length = model.img_encoder.embeddings.patch_embeddings.num_patches + 1
 
     # init processor and tokenizer
-    image_processor = AutoImageProcessor.from_pretrained(
-        DEFAULT_PRETRAINED_VIT)
+    image_processor = AutoImageProcessor.from_pretrained(DEFAULT_PRETRAINED_VIT)
     decoder_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_BART)
-    orc_text_tokenizer = AutoTokenizer.from_pretrained(
-        DEFAULT_PRETRAINED_LAYOUTLM)
+    orc_text_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_LAYOUTLM)
 
     # prepare inputs
     # decoder input
@@ -96,26 +94,37 @@ if __name__ == "__main__":
         token_boxes.extend([box] * len(word_tokens))
 
     # add bounding boxes of cls + sep tokens
-    token_boxes = [[0, 0, 0, 0]] + token_boxes + [[1000, 1000, 1000, 1000]] * (seq_length - 1 - len(token_boxes))   # pad to seq_length
+    token_boxes = (
+        [[0, 0, 0, 0]]
+        + token_boxes
+        + [[1000, 1000, 1000, 1000]] * (seq_length - 1 - len(token_boxes))
+    )  # pad to seq_length
     bbox = torch.tensor([token_boxes])
 
     prompt = task_prompt.format(question)
     decoder_input_ids = decoder_tokenizer(
-        prompt,
-        add_special_tokens=False,
-        return_tensors="pt"
+        prompt, add_special_tokens=False, return_tensors="pt"
     ).input_ids
 
     ocr_text_input_ids = orc_text_tokenizer(
         " ".join(ocr_text),
         return_tensors="pt",
         max_length=seq_length,
-        padding="max_length").input_ids
-    
-    ocr_text_attention_mask = torch.where(ocr_text_input_ids != 0, torch.tensor(1), torch.tensor(0))
+        padding="max_length",
+    ).input_ids
+
+    ocr_text_attention_mask = torch.where(
+        ocr_text_input_ids != 0, torch.tensor(1), torch.tensor(0)
+    )
 
     pixel_values = image_processor(im, return_tensors="pt").pixel_values
 
     # run model
-    output = model(pixel_values, decoder_input_ids, ocr_text_input_ids, ocr_text_attention_mask, bbox)
+    output = model(
+        pixel_values,
+        decoder_input_ids,
+        ocr_text_input_ids,
+        ocr_text_attention_mask,
+        bbox,
+    )
     print(output)
