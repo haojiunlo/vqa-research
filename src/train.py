@@ -1,12 +1,12 @@
 import lightning.pytorch as pl
 from torch.utils.data import DataLoader
 
-from models.ocr_embedding import OcrEmbedding
-from models.vqa_model import LitVqaModel
-from utils.datasets import VqaDataset
+from src.models.ocr_embedding import OcrEmbedding
+from src.models.vqa_model import LitVqaModel
+from src.utils.datasets import TextVqaDataset
 
 if __name__ == "__main__":
-    dataset = VqaDataset()
+    dataset = TextVqaDataset()
     train_loader = DataLoader(dataset)
 
     model = LitVqaModel(OcrEmbedding, None, None)
