@@ -10,8 +10,8 @@ class HashEmbedding(nn.Module):
         super().__init__()
         self.n_tok = n_tok
         self.n_hash = n_hash
-        # TODO -- set pad value
-        self.E = nn.Embedding(n_tok, emb_dim)
+        self.E = nn.Embedding(n_tok + 1, emb_dim, padding_idx=0)
+        torch.nn.init.xavier_uniform_(self.E.weight)
 
     def prepare_input(self, tokens: List[str]):
         all_keys = [
@@ -25,8 +25,9 @@ class HashEmbedding(nn.Module):
 
     @staticmethod
     def dataset_prepare_input(tokens: List[str], n_tok: int, n_hash: int):
+        # Note: `(mmh3.hash(t, i) % n_tok) + 1)` - the `+ 1` is to account for padding
         all_keys = [
-            torch.LongTensor([(mmh3.hash(t, i) % n_tok) for i in range(n_hash)])
+            torch.LongTensor([((mmh3.hash(t, i) % n_tok) + 1) for i in range(n_hash)])
             for t in tokens
         ]
         # [n_tokens x n_keys]

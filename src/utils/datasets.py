@@ -23,7 +23,7 @@ def collate_batch(samples):
         "question": torch.stack([x["question"] for x in samples]),
         "answer": torch.stack([x["answer"] for x in samples]),
         "image": torch.stack([x["image"] for x in samples]),
-        # OCR # FIXME -- set pad value
+        # Note: padding value is 0, the same as the padding index in the embeddings
         "tok": pad_sequence([x["ocr"]["tok"] for x in samples], batch_first=True),
         "x0": pad_sequence([x["ocr"]["x0"] for x in samples], batch_first=True),
         "y0": pad_sequence([x["ocr"]["y0"] for x in samples], batch_first=True),
@@ -90,14 +90,19 @@ class TextVqaDataset(Dataset):
                 v["img_width"],
                 v["img_height"],
                 [
+                    # Note: `+ 1` for x, y img coords to account for embedding pad idx
                     OcrInfo(
                         x["word"],
                         int(v["img_width"] * x["w"]),
                         int(v["img_height"] * x["h"]),
-                        int(v["img_width"] * x["x0"]),
-                        int(v["img_height"] * x["y0"]),
-                        int(v["img_width"] * x["x0"]) + int(v["img_width"] * x["w"]),
-                        int(v["img_height"] * x["y0"]) + int(v["img_height"] * x["h"]),
+                        int(v["img_width"] * x["x0"]) + 1,
+                        int(v["img_height"] * x["y0"]) + 1,
+                        int(v["img_width"] * x["x0"])
+                        + int(v["img_width"] * x["w"])
+                        + 1,
+                        int(v["img_height"] * x["y0"])
+                        + int(v["img_height"] * x["h"])
+                        + 1,
                     )
                     for x in imgid2ocr.get(v["image_id"])
                 ],
