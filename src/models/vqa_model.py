@@ -1,30 +1,19 @@
-from typing import Optional
-
-import PIL
 import torch
 from transformers import AutoModel, AutoModelForCausalLM
 
 DEFAULT_PRETRAINED_BART = "sshleifer/tiny-mbart"
 DEFAULT_PRETRAINED_VIT = "google/vit-base-patch16-224"
-DEFAULT_PRETRAINED_BERT = "distilbert-base-multilingual-cased"
-
+DEFAULT_PRETRAINED_LAYOUTLM = "microsoft/layoutlm-base-uncased"
 
 # TODO: OCR encoder, custom VisionEncoderDecoderModel that has vit, ocr encoder and bart decoder, \
 # custom processor to process ocr output text, input text and image
 
 
 class VQAModel(torch.nn.Module):
-    r"""
-    Donut: an E2E OCR-free Document Understanding Transformer.
-    The encoder maps an input document image into a set of embeddings,
-    the decoder predicts a desired token sequence, that can be converted to a structured format,
-    given a prompt and the encoder output embeddings
-    """
-
     def __init__(self):
         super().__init__()
         self.img_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_VIT)
-        self.ocr_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_BERT)
+        self.ocr_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_LAYOUTLM)
         self.decoder = AutoModelForCausalLM.from_pretrained(DEFAULT_PRETRAINED_BART)
         self.enc_to_dec_proj = torch.nn.Sequential(
             torch.nn.Linear(
@@ -39,20 +28,15 @@ class VQAModel(torch.nn.Module):
         image_tensors: torch.Tensor,
         decoder_input_ids: torch.Tensor,
         ocr_text_tensors: torch.Tensor,
+        ocr_text_attention_mask: torch.Tensor,
+        bbox: torch.Tensor,
         decoder_labels: torch.Tensor = None,
     ):
-        """
-        Calculate a loss given an input image and a desired token sequence,
-        the model will be trained in a teacher-forcing manner
-
-        Args:
-            image_tensors: (batch_size, num_channels, height, width)
-            decoder_input_ids: (batch_size, sequence_length, embedding_dim)
-            decode_labels: (batch_size, sequence_length)
-        """
         img_encoder_outputs = self.img_encoder(image_tensors)
         img_encoder_hidden_states = img_encoder_outputs[0]
-        ocr_encoder_outputs = self.ocr_encoder(ocr_text_tensors)
+        ocr_encoder_outputs = self.ocr_encoder(
+            ocr_text_tensors, bbox=bbox, attention_mask=ocr_text_attention_mask
+        )
         ocr_encoder_hidden_states = ocr_encoder_outputs[0]
 
         encoder_hidden_states = torch.concat(
@@ -85,31 +69,62 @@ if __name__ == "__main__":
     # init processor and tokenizer
     image_processor = AutoImageProcessor.from_pretrained(DEFAULT_PRETRAINED_VIT)
     decoder_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_BART)
-    orc_text_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_BERT)
+    orc_text_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_LAYOUTLM)
 
     # prepare inputs
+    # decoder input
     task_prompt = "<s_docvqa><s_question>{}</s_question><s_answer>"
     question = "What is the product title?"
-    ocr_text = "ocr text here"
+
+    # ocr encoder input
+    ocr_text = ["Hello", "world"]
+    normalized_word_boxes = [637, 773, 693, 782], [698, 773, 733, 782]
+    # Note that one first needs to normalize the bounding boxes to be on a 0-1000 scale. To normalize, you can use the following function:
+    # def normalize_bbox(bbox, width, height):
+    #     return [
+    #         int(1000 * (bbox[0] / width)),
+    #         int(1000 * (bbox[1] / height)),
+    #         int(1000 * (bbox[2] / width)),
+    #         int(1000 * (bbox[3] / height)),
+    #     ]
+
+    token_boxes = []
+    for word, box in zip(ocr_text, normalized_word_boxes):
+        word_tokens = orc_text_tokenizer.tokenize(word)
+        token_boxes.extend([box] * len(word_tokens))
+
+    # add bounding boxes of cls + sep tokens
+    token_boxes = (
+        [[0, 0, 0, 0]]
+        + token_boxes
+        + [[1000, 1000, 1000, 1000]] * (seq_length - 1 - len(token_boxes))
+    )  # pad to seq_length
+    bbox = torch.tensor([token_boxes])
 
     prompt = task_prompt.format(question)
     decoder_input_ids = decoder_tokenizer(
-        prompt,
-        add_special_tokens=False,
-        return_tensors="pt",
-        max_length=seq_length,  # vit patches num
-        padding="max_length",
+        prompt, add_special_tokens=False, return_tensors="pt"
     ).input_ids
 
     ocr_text_input_ids = orc_text_tokenizer(
-        ocr_text,
+        " ".join(ocr_text),
         return_tensors="pt",
-        max_length=seq_length,  # vit patches num
+        max_length=seq_length,
         padding="max_length",
     ).input_ids
+
+    ocr_text_attention_mask = torch.where(
+        ocr_text_input_ids != 0, torch.tensor(1), torch.tensor(0)
+    )
 
     pixel_values = image_processor(im, return_tensors="pt").pixel_values
 
     # run model
-    output = model(pixel_values, decoder_input_ids, ocr_text_input_ids)
+    output = model(
+        pixel_values,
+        decoder_input_ids,
+        ocr_text_input_ids,
+        ocr_text_attention_mask,
+        bbox,
+    )
     print(output)
