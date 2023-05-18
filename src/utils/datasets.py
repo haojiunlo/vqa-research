@@ -8,6 +8,8 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoImageProcessor, AutoTokenizer
 
+from src.models.hash_embedding import HashEmbedding
+
 TextVqaSample = namedtuple(
     "TextVqaSample",
     ["question", "answer", "image_id", "img_width", "img_height", "ocr_info"],
@@ -22,13 +24,13 @@ def collate_batch(samples):
         "answer": torch.stack([x["answer"] for x in samples]),
         "image": torch.stack([x["image"] for x in samples]),
         # OCR # FIXME -- set pad value
-        "tok": pad_sequence([x["ocr"]["tok"] for x in samples]),
-        "x0": pad_sequence([x["ocr"]["x0"] for x in samples]),
-        "y0": pad_sequence([x["ocr"]["y0"] for x in samples]),
-        "x1": pad_sequence([x["ocr"]["x1"] for x in samples]),
-        "y1": pad_sequence([x["ocr"]["y1"] for x in samples]),
-        "w": pad_sequence([x["ocr"]["w"] for x in samples]),
-        "h": pad_sequence([x["ocr"]["h"] for x in samples]),
+        "tok": pad_sequence([x["ocr"]["tok"] for x in samples], batch_first=True),
+        "x0": pad_sequence([x["ocr"]["x0"] for x in samples], batch_first=True),
+        "y0": pad_sequence([x["ocr"]["y0"] for x in samples], batch_first=True),
+        "x1": pad_sequence([x["ocr"]["x1"] for x in samples], batch_first=True),
+        "y1": pad_sequence([x["ocr"]["y1"] for x in samples], batch_first=True),
+        "w": pad_sequence([x["ocr"]["w"] for x in samples], batch_first=True),
+        "h": pad_sequence([x["ocr"]["h"] for x in samples], batch_first=True),
     }
 
     return batch
@@ -40,10 +42,14 @@ class TextVqaDataset(Dataset):
         path: str = "data/TextVQA",
         pretrained_vit: str = "google/vit-base-patch16-224",
         pretrained_dec: str = "sshleifer/tiny-mbart",
+        hash_embed_n_tok: int = 6000,  # Number of rows in the embedding
+        hash_embed_n_hash: int = 4,  # Number of hash functions
     ):
         self.base_path = path
         self.image_processor = AutoImageProcessor.from_pretrained(pretrained_vit)
         self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        self.hash_embed_n_tok = hash_embed_n_tok
+        self.hash_embed_n_hash = hash_embed_n_hash
 
         with open(os.path.join(path, "TextVQA_0.5.1_train.json"), "r") as f:
             data = json.load(f)
@@ -112,7 +118,7 @@ class TextVqaDataset(Dataset):
             return_tensors="pt",
             max_length=128,  # TODO -- don't hardcode this
             padding="max_length",
-        ).input_ids
+        ).input_ids.squeeze(0)
 
         answer_tensor = self.decoder_tokenizer(
             vqa_sample.answer,
@@ -120,19 +126,23 @@ class TextVqaDataset(Dataset):
             return_tensors="pt",
             max_length=128,  # TODO -- don't hardcode this
             padding="max_length",
-        ).input_ids
+        ).input_ids.squeeze(0)
 
         # Preprocess the image
         im = Image.open(
             os.path.join(self.base_path, "train_images", f"{vqa_sample.image_id}.jpg")
         )
         im = im.convert("RGB")
-        image_tensor = self.image_processor(im, return_tensors="pt").pixel_values
+        image_tensor = self.image_processor(
+            im, return_tensors="pt"
+        ).pixel_values.squeeze(0)
 
         # Prepare OCR Embedding input
-        tok_tensor = torch.LongTensor(
-            [0, 0, 0, 0, 0]
-        )  # TODO -- Figure out how vocab will work
+        tok_tensor = HashEmbedding.dataset_prepare_input(
+            [x.word for x in vqa_sample.ocr_info],
+            n_tok=self.hash_embed_n_tok,
+            n_hash=self.hash_embed_n_hash,
+        )
         x0_tensor = torch.LongTensor([x.x0 for x in vqa_sample.ocr_info])
         y0_tensor = torch.LongTensor([x.y0 for x in vqa_sample.ocr_info])
         x1_tensor = torch.LongTensor([x.x1 for x in vqa_sample.ocr_info])
