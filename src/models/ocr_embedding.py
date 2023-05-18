@@ -5,9 +5,7 @@ from src.models.hash_embedding import HashEmbedding
 
 
 class OcrEmbedding(nn.Module):
-    def __init__(
-        self, n_tok: int, emb_dim: int, img_width: int, img_height: int, alpha: float
-    ):
+    def __init__(self, n_tok: int, n_img_emb: int, emb_dim: int, alpha: float):
         super().__init__()
         # OCR Token Embedding
         # Note: HashEmbedding inits its own weights and accounts for padding internally
@@ -15,16 +13,16 @@ class OcrEmbedding(nn.Module):
 
         # OCR Bounding Box Embedding
         self.alpha = alpha
-        self.E_x = nn.Embedding(img_width + 1, emb_dim, padding_idx=0)
+        self.E_x = nn.Embedding(n_img_emb + 1, emb_dim, padding_idx=0)
         torch.nn.init.xavier_uniform_(self.E_x.weight)
 
-        self.E_y = nn.Embedding(img_height + 1, emb_dim, padding_idx=0)
+        self.E_y = nn.Embedding(n_img_emb + 1, emb_dim, padding_idx=0)
         torch.nn.init.xavier_uniform_(self.E_y.weight)
 
-        self.E_w = nn.Embedding(img_width + 1, emb_dim, padding_idx=0)
+        self.E_w = nn.Embedding(n_img_emb + 1, emb_dim, padding_idx=0)
         torch.nn.init.xavier_uniform_(self.E_w.weight)
 
-        self.E_h = nn.Embedding(img_height + 1, emb_dim, padding_idx=0)
+        self.E_h = nn.Embedding(n_img_emb + 1, emb_dim, padding_idx=0)
         torch.nn.init.xavier_uniform_(self.E_h.weight)
 
         self.MLP = nn.Sequential(nn.Linear(emb_dim, emb_dim), nn.ReLU())
@@ -54,7 +52,7 @@ class OcrEmbedding(nn.Module):
 
 
 if __name__ == "__main__":
-    ocr_emb = OcrEmbedding(10, 64, 100, 100, 0.5)
+    ocr_emb = OcrEmbedding(100, 100, 64, 0.5)
 
     test = ocr_emb(
         # Word Token
