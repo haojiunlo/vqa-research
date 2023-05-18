@@ -23,6 +23,15 @@ class HashEmbedding(nn.Module):
         # [n_tokens x n_keys]
         return torch.stack(all_keys)
 
+    @staticmethod
+    def dataset_prepare_input(tokens: List[str], n_tok: int, n_hash: int):
+        all_keys = [
+            torch.LongTensor([(mmh3.hash(t, i) % n_tok) for i in range(n_hash)])
+            for t in tokens
+        ]
+        # [n_tokens x n_keys]
+        return torch.stack(all_keys)
+
     def forward(self, x):
         # X: [batch x n_tokens x n_keys]
         embeds = self.E(x)
