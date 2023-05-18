@@ -12,7 +12,7 @@ from src.models.hash_embedding import HashEmbedding
 
 TextVqaSample = namedtuple(
     "TextVqaSample",
-    ["question", "answer", "image_id", "img_width", "img_height", "ocr_info"],
+    ["question", "answer", "image_id", "ocr_info"],
 )
 
 OcrInfo = namedtuple("OcrInfo", ["word", "w", "h", "x0", "y0", "x1", "y1"])
@@ -62,8 +62,6 @@ class TextVqaDataset(Dataset):
                 "question": x["question"],
                 "answer": Counter(x["answers"]).most_common(1)[0][0],
                 "image_id": x["image_id"],
-                "img_width": x["image_width"],
-                "img_height": x["image_height"],
             }
             for x in data["data"]
         ]
@@ -87,22 +85,17 @@ class TextVqaDataset(Dataset):
                 v["question"],
                 v["answer"],
                 v["image_id"],
-                v["img_width"],
-                v["img_height"],
                 [
                     # Note: `+ 1` for x, y img coords to account for embedding pad idx
+                    # Note: Scale all img coords onto a 1000 x 1000 image
                     OcrInfo(
                         x["word"],
-                        int(v["img_width"] * x["w"]),
-                        int(v["img_height"] * x["h"]),
-                        int(v["img_width"] * x["x0"]) + 1,
-                        int(v["img_height"] * x["y0"]) + 1,
-                        int(v["img_width"] * x["x0"])
-                        + int(v["img_width"] * x["w"])
-                        + 1,
-                        int(v["img_height"] * x["y0"])
-                        + int(v["img_height"] * x["h"])
-                        + 1,
+                        int(1000 * x["w"]),
+                        int(1000 * x["h"]),
+                        int(1000 * x["x0"]) + 1,
+                        int(1000 * x["y0"]) + 1,
+                        int(1000 * x["x0"]) + int(1000 * x["w"]) + 1,
+                        int(1000 * x["y0"]) + int(1000 * x["h"]) + 1,
                     )
                     for x in imgid2ocr.get(v["image_id"])
                 ],
@@ -143,17 +136,27 @@ class TextVqaDataset(Dataset):
         ).pixel_values.squeeze(0)
 
         # Prepare OCR Embedding input
-        tok_tensor = HashEmbedding.dataset_prepare_input(
-            [x.word for x in vqa_sample.ocr_info],
-            n_tok=self.hash_embed_n_tok,
-            n_hash=self.hash_embed_n_hash,
-        )
-        x0_tensor = torch.LongTensor([x.x0 for x in vqa_sample.ocr_info])
-        y0_tensor = torch.LongTensor([x.y0 for x in vqa_sample.ocr_info])
-        x1_tensor = torch.LongTensor([x.x1 for x in vqa_sample.ocr_info])
-        y1_tensor = torch.LongTensor([x.y1 for x in vqa_sample.ocr_info])
-        w_tensor = torch.LongTensor([x.w for x in vqa_sample.ocr_info])
-        h_tensor = torch.LongTensor([x.h for x in vqa_sample.ocr_info])
+        # Note: not all images have OCR data
+        if vqa_sample.ocr_info:
+            tok_tensor = HashEmbedding.dataset_prepare_input(
+                [x.word for x in vqa_sample.ocr_info],
+                n_tok=self.hash_embed_n_tok,
+                n_hash=self.hash_embed_n_hash,
+            )
+            x0_tensor = torch.LongTensor([x.x0 for x in vqa_sample.ocr_info])
+            y0_tensor = torch.LongTensor([x.y0 for x in vqa_sample.ocr_info])
+            x1_tensor = torch.LongTensor([x.x1 for x in vqa_sample.ocr_info])
+            y1_tensor = torch.LongTensor([x.y1 for x in vqa_sample.ocr_info])
+            w_tensor = torch.LongTensor([x.w for x in vqa_sample.ocr_info])
+            h_tensor = torch.LongTensor([x.h for x in vqa_sample.ocr_info])
+        else:
+            tok_tensor = torch.LongTensor([[0, 0, 0, 0]])
+            x0_tensor = torch.LongTensor([0])
+            y0_tensor = torch.LongTensor([0])
+            x1_tensor = torch.LongTensor([0])
+            y1_tensor = torch.LongTensor([0])
+            w_tensor = torch.LongTensor([0])
+            h_tensor = torch.LongTensor([0])
 
         return {
             "question": question_tensor,
