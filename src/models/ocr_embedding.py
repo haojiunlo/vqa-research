@@ -15,6 +15,7 @@ class OcrEmbedding(nn.Module):
         self.E_y = nn.Embedding(img_height, emb_dim)
         self.E_w = nn.Embedding(img_width, emb_dim)
         self.E_h = nn.Embedding(img_height, emb_dim)
+        # TODO -- init weights
 
         self.MLP = nn.Sequential(nn.Linear(emb_dim, emb_dim), nn.ReLU())
 
