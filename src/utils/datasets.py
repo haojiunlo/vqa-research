@@ -176,13 +176,18 @@ class TextVqaDataset(Dataset):
         vqa_sample = self.samples[idx]
 
         # Tokenize question and answer using the decoders tokenizer
-        input_ids = self.decoder_tokenizer(
+        q_ids = self.decoder_tokenizer(
             vqa_sample.question,
-            text_pair=vqa_sample.answer,
-            add_special_tokens=True,
             max_length=128,  # TODO -- don't hardcode this
             truncation=True,
         ).input_ids
+        a_ids = self.decoder_tokenizer(
+            vqa_sample.question,
+            text_pair=vqa_sample.answer,
+            max_length=128,  # TODO -- don't hardcode this
+            truncation=True,
+        ).input_ids
+        input_ids = [self.decoder_tokenizer.bos_token_id] + q_ids + [self.decoder_tokenizer.eos_token_id] + a_ids + [self.decoder_tokenizer.eos_token_id]
 
         # Preprocess the image
         im = Image.open(
