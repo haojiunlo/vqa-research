@@ -15,6 +15,7 @@ class TextVqaDataset(Dataset):
         pretrained_vit: str = "google/vit-base-patch16-224",
         pretrained_dec: str = "sshleifer/tiny-mbart",
         max_len: int = 128,
+        pretrained_ocr_enc: str = "microsoft/layoutlm-base-uncased",
         hash_embed_n_tok: int = 6000,  # Number of rows in the embedding
         hash_embed_n_hash: int = 4,  # Number of hash functions
     ):
@@ -22,8 +23,14 @@ class TextVqaDataset(Dataset):
         self.image_processor = AutoImageProcessor.from_pretrained(pretrained_vit)
         self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
         self.max_length = max_len
-        self.hash_embed_n_tok = hash_embed_n_tok
-        self.hash_embed_n_hash = hash_embed_n_hash
+        self.pretrained_ocr_enc = pretrained_ocr_enc
+        if pretrained_ocr_enc is not None:
+            self.orc_text_tokenizer = AutoTokenizer.from_pretrained(
+                self.pretrained_ocr_enc
+            )
+        else:
+            self.hash_embed_n_tok = hash_embed_n_tok
+            self.hash_embed_n_hash = hash_embed_n_hash
 
         with open(os.path.join(path, "TextVQA_0.5.1_train.json"), "r") as f:
             data = json.load(f)
@@ -62,6 +69,7 @@ class TextVqaDataset(Dataset):
                 [
                     # Note: `+ 1` for x, y img coords to account for embedding pad idx
                     # Note: Scale all img coords onto a 1000 x 1000 image
+                    # FIXME -- make sure these are between 0 and 1000
                     OcrInfo(
                         x["word"],
                         int(1000 * x["w"]) + 1,
