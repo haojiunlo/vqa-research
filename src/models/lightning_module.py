@@ -15,7 +15,14 @@ class LitVqaModel(pl.LightningModule):
     def __init__(self, args):
         super().__init__()
         self.model = VQAModel()
-        self.lr = args.learning_rate
+        self.lr = args["learning_rate"]
+        self.train_batch_sizes = args["train_batch_sizes"]
+        self.max_epochs = args["max_epochs"]
+        self.max_steps = args["max_steps"]
+        self.warmup_steps = args["warmup_steps"]
+        self.num_training_samples_per_epoch = args["num_training_samples_per_epoch"]
+        self.accelerator = args["accelerator"]
+
 
     def training_step(self, batch, batch_idx):
         loss = self.model(
@@ -77,37 +84,33 @@ class LitVqaModel(pl.LightningModule):
     #     )
 
     def configure_optimizers(self):
-        # max_iter = None
+        max_iter = None
 
-        # if int(self.config.get("max_epochs", -1)) > 0:
-        #     assert (
-        #         len(self.config.train_batch_sizes) == 1
-        #     ), "Set max_epochs only if the number of datasets is 1"
-        #     max_iter = (
-        #         self.config.max_epochs * self.config.num_training_samples_per_epoch
-        #     ) / (
-        #         self.config.train_batch_sizes[0]
-        #         * torch.cuda.device_count()
-        #         * self.config.get("num_nodes", 1)
-        #     )
+        if self.max_epochs > 0:
+            max_iter = (
+                self.max_epochs * self.num_training_samples_per_epoch
+            ) / (
+                self.train_batch_sizes
+                * torch.cuda.device_count() if self.accelerator == "gpu" else 1
+            )
 
-        # if int(self.config.get("max_steps", -1)) > 0:
-        #     max_iter = (
-        #         min(self.config.max_steps, max_iter)
-        #         if max_iter is not None
-        #         else self.config.max_steps
-        #     )
+        if self.max_steps > 0:
+            max_iter = (
+                min(self.max_steps, max_iter)
+                if max_iter is not None
+                else self.max_steps
+            )
 
         # assert max_iter is not None
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        # scheduler = {
-        #     "scheduler": self.cosine_scheduler(
-        #         optimizer, max_iter, self.config.warmup_steps
-        #     ),
-        #     "name": "learning_rate",
-        #     "interval": "step",
-        # }
-        return [optimizer]
+        scheduler = {
+            "scheduler": self.cosine_scheduler(
+                optimizer, max_iter, self.warmup_steps
+            ),
+            "name": "learning_rate",
+            "interval": "step",
+        }
+        return [optimizer], [scheduler]
 
     @staticmethod
     def cosine_scheduler(optimizer, training_steps, warmup_steps):

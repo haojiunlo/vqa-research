@@ -124,7 +124,7 @@ class TextVqaDataset(Dataset):
         img_data = [
             {
                 "question": x["question"],
-                "answer": Counter(x.get("answers", ["default answer"])).most_common(1)[
+                "answer": Counter(x.get("answers", ["no answer provided"])).most_common(1)[
                     0
                 ][0],
                 "image_id": x["image_id"],
@@ -244,6 +244,7 @@ class TextVqaDataset(Dataset):
                 "ocr_bbox": bbox,
             }
         else:
+            # TODO: 
             # Prepare OCR Embedding input
             # Note: not all images have OCR data
             if vqa_sample.ocr_info:

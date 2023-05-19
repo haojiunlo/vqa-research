@@ -23,6 +23,7 @@ class VQAModel(torch.nn.Module):
         super().__init__()
         self.img_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_VIT)
         self.ocr_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_LAYOUTLM)
+        # TODO: intergrate with ocr_embedding
         self.decoder = AutoModelForCausalLM.from_pretrained(DEFAULT_PRETRAINED_BART)
         self.decoder_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_BART)
         self.enc_to_dec_proj = torch.nn.Sequential(
