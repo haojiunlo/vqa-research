@@ -23,7 +23,6 @@ class LitVqaModel(pl.LightningModule):
         self.num_training_samples_per_epoch = args["num_training_samples_per_epoch"]
         self.accelerator = args["accelerator"]
 
-
     def training_step(self, batch, batch_idx):
         loss = self.model(
             image_tensors=batch["image"],
@@ -87,11 +86,10 @@ class LitVqaModel(pl.LightningModule):
         max_iter = None
 
         if self.max_epochs > 0:
-            max_iter = (
-                self.max_epochs * self.num_training_samples_per_epoch
-            ) / (
-                self.train_batch_sizes
-                * torch.cuda.device_count() if self.accelerator == "gpu" else 1
+            max_iter = (self.max_epochs * self.num_training_samples_per_epoch) / (
+                self.train_batch_sizes * torch.cuda.device_count()
+                if self.accelerator == "gpu"
+                else 1
             )
 
         if self.max_steps > 0:
@@ -104,9 +102,7 @@ class LitVqaModel(pl.LightningModule):
         # assert max_iter is not None
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         scheduler = {
-            "scheduler": self.cosine_scheduler(
-                optimizer, max_iter, self.warmup_steps
-            ),
+            "scheduler": self.cosine_scheduler(optimizer, max_iter, self.warmup_steps),
             "name": "learning_rate",
             "interval": "step",
         }

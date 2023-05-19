@@ -124,9 +124,9 @@ class TextVqaDataset(Dataset):
         img_data = [
             {
                 "question": x["question"],
-                "answer": Counter(x.get("answers", ["no answer provided"])).most_common(1)[
-                    0
-                ][0],
+                "answer": Counter(x.get("answers", ["no answer provided"])).most_common(
+                    1
+                )[0][0],
                 "image_id": x["image_id"],
             }
             for x in data["data"]
@@ -158,10 +158,14 @@ class TextVqaDataset(Dataset):
                         x["word"],
                         int(1000 * x["w"]),
                         int(1000 * x["h"]),
-                        int(1000 * x["x0"]) + 1,
-                        int(1000 * x["y0"]) + 1,
-                        int(1000 * x["x0"]) + int(1000 * x["w"]) + 1,
-                        int(1000 * x["y0"]) + int(1000 * x["h"]) + 1,
+                        max(
+                            0, min(1000, int(1000 * x["x0"]))
+                        ),  # prevent index out of bounds
+                        max(0, min(1000, int(1000 * x["y0"]))),
+                        max(
+                            0, min(1000, int(1000 * x["x0"]) + int(1000 * x["w"]))
+                        ),  # prevent index out of bounds
+                        max(0, min(1000, int(1000 * x["y0"]) + int(1000 * x["h"]))),
                     )
                     for x in imgid2ocr.get(v["image_id"])
                 ],
@@ -187,7 +191,13 @@ class TextVqaDataset(Dataset):
             max_length=128,  # TODO -- don't hardcode this
             truncation=True,
         ).input_ids
-        input_ids = [self.decoder_tokenizer.bos_token_id] + q_ids + [self.decoder_tokenizer.eos_token_id] + a_ids + [self.decoder_tokenizer.eos_token_id]
+        input_ids = (
+            [self.decoder_tokenizer.bos_token_id]
+            + q_ids
+            + [self.decoder_tokenizer.eos_token_id]
+            + a_ids
+            + [self.decoder_tokenizer.eos_token_id]
+        )
 
         # Preprocess the image
         im = Image.open(
@@ -249,7 +259,7 @@ class TextVqaDataset(Dataset):
                 "ocr_bbox": bbox,
             }
         else:
-            # TODO: 
+            # TODO:
             # Prepare OCR Embedding input
             # Note: not all images have OCR data
             if vqa_sample.ocr_info:
