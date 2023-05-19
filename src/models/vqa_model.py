@@ -2,7 +2,12 @@ import re
 from typing import Any, Optional
 
 import torch
-from transformers import AutoModel, AutoModelForCausalLM, PreTrainedTokenizer
+from transformers import (
+    AutoModel,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    PreTrainedTokenizer,
+)
 from transformers.file_utils import ModelOutput
 
 DEFAULT_PRETRAINED_BART = "sshleifer/tiny-mbart"
@@ -18,7 +23,9 @@ class VQAModel(torch.nn.Module):
         super().__init__()
         self.img_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_VIT)
         self.ocr_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_LAYOUTLM)
+        # TODO: intergrate with ocr_embedding
         self.decoder = AutoModelForCausalLM.from_pretrained(DEFAULT_PRETRAINED_BART)
+        self.decoder_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_BART)
         self.enc_to_dec_proj = torch.nn.Sequential(
             torch.nn.Linear(
                 self.ocr_encoder.config.hidden_size
@@ -64,8 +71,6 @@ class VQAModel(torch.nn.Module):
         ocr_text_attention_mask: torch.Tensor,
         bbox_tensor: torch.Tensor,
         decoder_tokenizer: PreTrainedTokenizer,
-        return_json: bool = True,
-        return_attentions: bool = False,
     ):
         img_encoder_hidden_states = self.img_encoder(image_tensors)[0]
         ocr_encoder_hidden_states = self.ocr_encoder(
@@ -94,11 +99,8 @@ class VQAModel(torch.nn.Module):
             encoder_hidden_states=encoder_outputs,
             max_length=self.decoder.config.max_length,
             early_stopping=True,
-            pad_token_id=decoder_tokenizer.pad_token_id,
-            eos_token_id=decoder_tokenizer.eos_token_id,
             use_cache=True,
             num_beams=1,
-            bad_words_ids=[[decoder_tokenizer.unk_token_id]],
             return_dict_in_generate=True,
             output_attentions=False,
         )
@@ -108,127 +110,9 @@ class VQAModel(torch.nn.Module):
             seq = seq.replace(decoder_tokenizer.eos_token, "").replace(
                 decoder_tokenizer.pad_token, ""
             )
-            # remove first task start token
-            seq = re.sub(r"<.*?>", "", seq, count=1).strip()
-            if return_json:
-                output["predictions"].append(self.token2json(decoder_tokenizer, seq))
-            else:
-                output["predictions"].append(seq)
-
-        if return_attentions:
-            output["attentions"] = {
-                "self_attentions": decoder_output.decoder_attentions,
-                "cross_attentions": decoder_output.cross_attentions,
-            }
+            output["predictions"].append(seq)
 
         return output
-
-    def json2token(
-        self,
-        decoder_tokenizer: PreTrainedTokenizer,
-        obj: Any,
-        update_special_tokens_for_json_key: bool = True,
-        sort_json_key: bool = True,
-    ):
-        """
-        Convert an ordered JSON object into a token sequence
-        """
-        if type(obj) == dict:
-            if len(obj) == 1 and "text_sequence" in obj:
-                return obj["text_sequence"]
-            else:
-                output = ""
-                if sort_json_key:
-                    keys = sorted(obj.keys(), reverse=True)
-                else:
-                    keys = obj.keys()
-                for k in keys:
-                    if update_special_tokens_for_json_key:
-                        self.decoder.add_special_tokens([rf"<s_{k}>", rf"</s_{k}>"])
-                    output += (
-                        rf"<s_{k}>"
-                        + self.json2token(
-                            obj[k],
-                            decoder_tokenizer,
-                            update_special_tokens_for_json_key,
-                            sort_json_key,
-                        )
-                        + rf"</s_{k}>"
-                    )
-                return output
-        elif type(obj) == list:
-            return r"<sep/>".join(
-                [
-                    self.json2token(
-                        item,
-                        decoder_tokenizer,
-                        update_special_tokens_for_json_key,
-                        sort_json_key,
-                    )
-                    for item in obj
-                ]
-            )
-        else:
-            obj = str(obj)
-            if f"<{obj}/>" in decoder_tokenizer.all_special_tokens:
-                obj = f"<{obj}/>"  # for categorical special tokens
-            return obj
-
-    def token2json(self, decoder_tokenizer, tokens, is_inner_value=False):
-        """
-        Convert a (generated) token seuqnce into an ordered JSON format
-        """
-        output = dict()
-
-        while tokens:
-            start_token = re.search(r"<s_(.*?)>", tokens, re.IGNORECASE)
-            if start_token is None:
-                break
-            key = start_token.group(1)
-            end_token = re.search(rf"</s_{key}>", tokens, re.IGNORECASE)
-            start_token = start_token.group()
-            if end_token is None:
-                tokens = tokens.replace(start_token, "")
-            else:
-                end_token = end_token.group()
-                start_token_escaped = re.escape(start_token)
-                end_token_escaped = re.escape(end_token)
-                content = re.search(
-                    f"{start_token_escaped}(.*?){end_token_escaped}",
-                    tokens,
-                    re.IGNORECASE,
-                )
-                if content is not None:
-                    content = content.group(1).strip()
-                    if r"<s_" in content and r"</s_" in content:  # non-leaf node
-                        value = self.token2json(content, is_inner_value=True)
-                        if value:
-                            if len(value) == 1:
-                                value = value[0]
-                            output[key] = value
-                    else:  # leaf nodes
-                        output[key] = []
-                        for leaf in content.split(r"<sep/>"):
-                            leaf = leaf.strip()
-                            if (
-                                leaf in decoder_tokenizer.get_added_vocab()
-                                and leaf[0] == "<"
-                                and leaf[-2:] == "/>"
-                            ):
-                                # for categorical special tokens
-                                leaf = leaf[1:-2]
-                            output[key].append(leaf)
-                        if len(output[key]) == 1:
-                            output[key] = output[key][0]
-
-                tokens = tokens[tokens.find(end_token) + len(end_token) :].strip()
-                if tokens[:6] == r"<sep/>":  # non-leaf nodes
-                    return [output] + self.token2json(tokens[6:], is_inner_value=True)
-
-        if len(output):
-            return [output] if is_inner_value else output
-        else:
-            return [] if is_inner_value else {"text_sequence": tokens}
 
 
 if __name__ == "__main__":
@@ -236,7 +120,7 @@ if __name__ == "__main__":
     from transformers import AutoImageProcessor, AutoTokenizer
 
     # example image
-    sample_image_path = "samples/iphone-14.jpeg"
+    sample_image_path = "src/models/samples/iphone-14.jpeg"
     im = Image.open(sample_image_path)
     im = im.convert("RGB")
 
@@ -252,7 +136,6 @@ if __name__ == "__main__":
 
     # prepare inputs
     # decoder input
-    task_prompt = "<s_docvqa><s_question>{}</s_question><s_answer>"
     question = "What is the product title?"
 
     # ocr encoder input
@@ -280,9 +163,8 @@ if __name__ == "__main__":
     )  # pad to seq_length
     bbox = torch.tensor([token_boxes])
 
-    prompt = task_prompt.format(question)
     decoder_input_ids = decoder_tokenizer(
-        prompt, add_special_tokens=False, return_tensors="pt"
+        question, add_special_tokens=False, return_tensors="pt"
     ).input_ids
 
     ocr_text_input = orc_text_tokenizer(
