@@ -4,7 +4,8 @@ import os
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoImageProcessor, AutoTokenizer
 
-from src.datasets.common import OcrInfo, VqaSample, collate_batch, vqa_sample_2_tensor
+from src.datasets.collators import collate_batch
+from src.datasets.common import OcrInfo, VqaSample, vqa_sample_2_tensor
 
 
 class InfoVqaDataset(Dataset):

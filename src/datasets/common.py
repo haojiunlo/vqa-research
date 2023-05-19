@@ -2,7 +2,6 @@ from collections import namedtuple
 
 import torch
 from PIL import Image
-from torch.nn.utils.rnn import pad_sequence
 
 from src.models.hash_embedding import HashEmbedding
 
@@ -93,15 +92,13 @@ def prepare_ocr_input_v1(
         h_tensor = torch.LongTensor([0])
 
     return {
-        "ocr": {
-            "tok": tok_tensor,
-            "x0": x0_tensor,
-            "y0": y0_tensor,
-            "x1": x1_tensor,
-            "y1": y1_tensor,
-            "w": w_tensor,
-            "h": h_tensor,
-        }
+        "ocr_tok": tok_tensor,
+        "ocr_x0": x0_tensor,
+        "ocr_y0": y0_tensor,
+        "ocr_x1": x1_tensor,
+        "ocr_y1": y1_tensor,
+        "ocr_w": w_tensor,
+        "ocr_h": h_tensor,
     }
 
 
@@ -171,11 +168,12 @@ def vqa_sample_2_tensor(
     # TODO -- redesign the way this works
     # Idea: each model makes their own `prepare_input` function
     # Tokenize question and answer using the decoders tokenizer
-    decoder_input = prep_decoder_input_v2(vqa_sample, decoder_tokenizer, max_len)
+    decoder_input = prep_decoder_input_v1(vqa_sample, decoder_tokenizer, max_len)
 
     # Preprocess the image
     image_input = prepare_image_input(img_path, image_processor)
 
+    # FIXME -- collate functions depend on which ocr you use
     if ocr_text_tokenizer:
         ocr_input = prepare_ocr_input_v2(vqa_sample, decoder_tokenizer)
     else:
@@ -184,21 +182,3 @@ def vqa_sample_2_tensor(
         )
 
     return {**decoder_input, **image_input, **ocr_input}
-
-
-def collate_batch(samples):
-    batch = {
-        "question": torch.stack([x["question"] for x in samples]),
-        "answer": torch.stack([x["answer"] for x in samples]),
-        "image": torch.stack([x["image"] for x in samples]),
-        # Note: padding value is 0, the same as the padding index in the embeddings
-        "tok": pad_sequence([x["ocr"]["tok"] for x in samples], batch_first=True),
-        "x0": pad_sequence([x["ocr"]["x0"] for x in samples], batch_first=True),
-        "y0": pad_sequence([x["ocr"]["y0"] for x in samples], batch_first=True),
-        "x1": pad_sequence([x["ocr"]["x1"] for x in samples], batch_first=True),
-        "y1": pad_sequence([x["ocr"]["y1"] for x in samples], batch_first=True),
-        "w": pad_sequence([x["ocr"]["w"] for x in samples], batch_first=True),
-        "h": pad_sequence([x["ocr"]["h"] for x in samples], batch_first=True),
-    }
-
-    return batch

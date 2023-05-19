@@ -5,7 +5,8 @@ from collections import Counter
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoImageProcessor, AutoTokenizer
 
-from src.datasets.common import OcrInfo, VqaSample, collate_batch, vqa_sample_2_tensor
+from src.datasets.collators import collate_batch
+from src.datasets.common import OcrInfo, VqaSample, vqa_sample_2_tensor
 
 
 class TextVqaDataset(Dataset):
@@ -25,12 +26,13 @@ class TextVqaDataset(Dataset):
         self.max_length = max_len
         self.pretrained_ocr_enc = pretrained_ocr_enc
         if pretrained_ocr_enc is not None:
-            self.orc_text_tokenizer = AutoTokenizer.from_pretrained(
+            self.ocr_text_tokenizer = AutoTokenizer.from_pretrained(
                 self.pretrained_ocr_enc
             )
         else:
-            self.hash_embed_n_tok = hash_embed_n_tok
-            self.hash_embed_n_hash = hash_embed_n_hash
+            self.ocr_text_tokenizer = None
+        self.hash_embed_n_tok = hash_embed_n_tok
+        self.hash_embed_n_hash = hash_embed_n_hash
 
         with open(os.path.join(path, "TextVQA_0.5.1_train.json"), "r") as f:
             data = json.load(f)
@@ -97,13 +99,14 @@ class TextVqaDataset(Dataset):
             self.max_length,
             os.path.join(self.base_path, "train_images", f"{vqa_sample.image_id}.jpg"),
             self.image_processor,
+            self.ocr_text_tokenizer,
             self.hash_embed_n_tok,
             self.hash_embed_n_hash,
         )
 
 
 if __name__ == "__main__":
-    ds = TextVqaDataset(path="../../data/TextVQA")
+    ds = TextVqaDataset(path="../../data/TextVQA", pretrained_ocr_enc=None)
     sample = ds[100]
     print(sample)
 

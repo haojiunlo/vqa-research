@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import transformers
+from torch.nn.utils.rnn import pad_sequence
 
 
 @dataclass
@@ -55,3 +56,21 @@ class CustomDataCollator:
             }
         )
         return batch
+
+
+def collate_batch(samples):
+    batch = {
+        "question": torch.stack([x["question"] for x in samples]),
+        "answer": torch.stack([x["answer"] for x in samples]),
+        "image": torch.stack([x["image"] for x in samples]),
+        # Note: padding value is 0, the same as the padding index in the embeddings
+        "tok": pad_sequence([x["ocr_tok"] for x in samples], batch_first=True),
+        "x0": pad_sequence([x["ocr_x0"] for x in samples], batch_first=True),
+        "y0": pad_sequence([x["ocr_y0"] for x in samples], batch_first=True),
+        "x1": pad_sequence([x["ocr_x1"] for x in samples], batch_first=True),
+        "y1": pad_sequence([x["ocr_y1"] for x in samples], batch_first=True),
+        "w": pad_sequence([x["ocr_w"] for x in samples], batch_first=True),
+        "h": pad_sequence([x["ocr_h"] for x in samples], batch_first=True),
+    }
+
+    return batch
