@@ -2,7 +2,7 @@ import json
 import os
 from collections import Counter, namedtuple
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -10,7 +10,7 @@ import transformers
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import AutoImageProcessor, AutoTokenizer, PreTrainedTokenizer
 
 from src.models.hash_embedding import HashEmbedding
 
@@ -97,15 +97,22 @@ class TextVqaDataset(Dataset):
         self,
         path: str = "data/TextVQA",
         pretrained_vit: str = "google/vit-base-patch16-224",
-        pretrained_dec: str = "sshleifer/tiny-mbart",
+        pretrained_dec: Union[
+            PreTrainedTokenizer, str
+        ] = "sshleifer/student-bart-base-3-3",
         pretrained_ocr_enc: str = "microsoft/layoutlm-base-uncased",
         mode: str = "train",
+        dec_tokenizer: PreTrainedTokenizer = None,
         hash_embed_n_tok: int = 6000,  # Number of rows in the embedding
         hash_embed_n_hash: int = 4,  # Number of hash functions
     ):
         self.base_path = path
         self.image_processor = AutoImageProcessor.from_pretrained(pretrained_vit)
-        self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        if isinstance(pretrained_dec, str):
+            self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        else:
+            self.decoder_tokenizer = pretrained_dec
+        self.decoder_tokenizer.add_special_tokens({"sep_token": "<s_answer>"})
         self.mode = mode
 
         self.pretrained_ocr_enc = pretrained_ocr_enc
@@ -209,16 +216,17 @@ class TextVqaDataset(Dataset):
             input_ids = (
                 [self.decoder_tokenizer.bos_token_id]
                 + q_ids
-                + [self.decoder_tokenizer.eos_token_id]
+                + [self.decoder_tokenizer.sep_token_id]
                 + a_ids
                 + [self.decoder_tokenizer.eos_token_id]
             )
             labels = [
                 token_id
-                if i > input_ids.index(self.decoder_tokenizer.eos_token_id)
+                if i >= input_ids.index(self.decoder_tokenizer.sep_token_id)
                 else -100
                 for i, token_id in enumerate(input_ids)
             ]
+            # labels = input_ids
             # model doesn't need to predict prompt (for VQA)
         elif self.mode == "val":
             q_ids = self.decoder_tokenizer(
@@ -230,7 +238,7 @@ class TextVqaDataset(Dataset):
             input_ids = (
                 [self.decoder_tokenizer.bos_token_id]
                 + q_ids
-                + [self.decoder_tokenizer.eos_token_id]
+                + [self.decoder_tokenizer.sep_token_id]
             )
             labels = self.decoder_tokenizer(
                 vqa_sample.answer,
@@ -336,7 +344,7 @@ class TextVqaDataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = TextVqaDataset(path="dataset")
+    ds = TextVqaDataset(path="/home/jovyan/vol-1/BREW-1146/data/TextVQA")
     sample = ds[100]
     print(sample)
 

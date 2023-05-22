@@ -20,13 +20,16 @@ class VQAModel(torch.nn.Module):
         pretrained_img_enc: str,
         pretrained_dec: str,
         pretrained_ocr_enc: str,
+        dec_tokenizer: PreTrainedTokenizer,
     ):
         super().__init__()
         self.img_encoder = AutoModel.from_pretrained(pretrained_img_enc)
         self.ocr_encoder = AutoModel.from_pretrained(pretrained_ocr_enc)
         # TODO: intergrate with ocr_embedding
         self.decoder = AutoModelForCausalLM.from_pretrained(pretrained_dec)
-        self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        self.decoder_tokenizer = dec_tokenizer
+        self.decoder.resize_token_embeddings(len(self.decoder_tokenizer))
+
         self.enc_to_dec_proj = torch.nn.Sequential(
             torch.nn.Linear(
                 self.ocr_encoder.config.hidden_size
