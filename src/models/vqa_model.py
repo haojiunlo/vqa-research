@@ -10,22 +10,23 @@ from transformers import (
 )
 from transformers.file_utils import ModelOutput
 
-DEFAULT_PRETRAINED_BART = "sshleifer/tiny-mbart"
-DEFAULT_PRETRAINED_VIT = "google/vit-base-patch16-224"
-DEFAULT_PRETRAINED_LAYOUTLM = "microsoft/layoutlm-base-uncased"
-
 # TODO: OCR encoder, custom VisionEncoderDecoderModel that has vit, ocr encoder and bart decoder, \
 # custom processor to process ocr output text, input text and image
 
 
 class VQAModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        pretrained_img_enc: str,
+        pretrained_dec: str,
+        pretrained_ocr_enc: str,
+    ):
         super().__init__()
-        self.img_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_VIT)
-        self.ocr_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_LAYOUTLM)
+        self.img_encoder = AutoModel.from_pretrained(pretrained_img_enc)
+        self.ocr_encoder = AutoModel.from_pretrained(pretrained_ocr_enc)
         # TODO: intergrate with ocr_embedding
-        self.decoder = AutoModelForCausalLM.from_pretrained(DEFAULT_PRETRAINED_BART)
-        self.decoder_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_BART)
+        self.decoder = AutoModelForCausalLM.from_pretrained(pretrained_dec)
+        self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
         self.enc_to_dec_proj = torch.nn.Sequential(
             torch.nn.Linear(
                 self.ocr_encoder.config.hidden_size
@@ -119,13 +120,21 @@ if __name__ == "__main__":
     from PIL import Image
     from transformers import AutoImageProcessor, AutoTokenizer
 
+    DEFAULT_PRETRAINED_BART = "sshleifer/tiny-mbart"
+    DEFAULT_PRETRAINED_VIT = "google/vit-base-patch16-224"
+    DEFAULT_PRETRAINED_LAYOUTLM = "microsoft/layoutlm-base-uncased"
+
     # example image
     sample_image_path = "src/models/samples/iphone-14.jpeg"
     im = Image.open(sample_image_path)
     im = im.convert("RGB")
 
     # init model
-    model = VQAModel()
+    model = VQAModel(
+        pretrained_img_enc=DEFAULT_PRETRAINED_VIT,
+        pretrained_dec=DEFAULT_PRETRAINED_BART,
+        pretrained_ocr_enc=DEFAULT_PRETRAINED_LAYOUTLM,
+    )
 
     seq_length = model.img_encoder.embeddings.patch_embeddings.num_patches + 1
 

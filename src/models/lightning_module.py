@@ -14,14 +14,18 @@ from src.models.vqa_model import VQAModel
 class LitVqaModel(pl.LightningModule):
     def __init__(self, args):
         super().__init__()
-        self.model = VQAModel()
-        self.lr = args["learning_rate"]
-        self.train_batch_sizes = args["train_batch_sizes"]
-        self.max_epochs = args["max_epochs"]
-        self.max_steps = args["max_steps"]
-        self.warmup_steps = args["warmup_steps"]
-        self.num_training_samples_per_epoch = args["num_training_samples_per_epoch"]
-        self.accelerator = args["accelerator"]
+        # call this to save hyperparameters to the checkpoint
+        self.save_hyperparameters(args)
+
+        # Now possible to access hyperparameters from hparams
+        self.model = VQAModel(
+            pretrained_img_enc=self.hparams.pretrained_img_enc,
+            pretrained_dec=self.hparams.pretrained_dec,
+            pretrained_ocr_enc=self.hparams.pretrained_ocr_enc,
+        )
+
+    def on_train_start(self):
+        self.logger.log_hyperparams(self.hparams)
 
     def training_step(self, batch, batch_idx):
         loss = self.model(
@@ -85,24 +89,28 @@ class LitVqaModel(pl.LightningModule):
     def configure_optimizers(self):
         max_iter = None
 
-        if self.max_epochs > 0:
-            max_iter = (self.max_epochs * self.num_training_samples_per_epoch) / (
-                self.train_batch_sizes * torch.cuda.device_count()
-                if self.accelerator == "gpu"
+        if self.hparams.max_epochs > 0:
+            max_iter = (
+                self.hparams.max_epochs * self.hparams.num_training_samples_per_epoch
+            ) / (
+                self.hparams.train_batch_sizes * torch.cuda.device_count()
+                if self.hparams.accelerator == "gpu"
                 else 1
             )
 
-        if self.max_steps > 0:
+        if self.hparams.max_steps > 0:
             max_iter = (
-                min(self.max_steps, max_iter)
+                min(self.hparams.max_steps, max_iter)
                 if max_iter is not None
-                else self.max_steps
+                else self.hparams.max_steps
             )
 
         # assert max_iter is not None
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
         scheduler = {
-            "scheduler": self.cosine_scheduler(optimizer, max_iter, self.warmup_steps),
+            "scheduler": self.cosine_scheduler(
+                optimizer, max_iter, self.hparams.warmup_steps
+            ),
             "name": "learning_rate",
             "interval": "step",
         }

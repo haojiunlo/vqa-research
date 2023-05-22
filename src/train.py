@@ -14,6 +14,24 @@ from src.utils.datasets import CustomDataCollator, TextVqaDataset
 
 def setup_parser():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--pretrained_img_enc",
+        default="google/vit-base-patch16-224",
+        type=str,
+        help="pretrained_img_enc",
+    )
+    parser.add_argument(
+        "--pretrained_dec",
+        default="sshleifer/tiny-mbart",
+        type=str,
+        help="pretrained_dec",
+    )
+    parser.add_argument(
+        "--pretrained_ocr_enc",
+        default="microsoft/layoutlm-base-uncased",
+        type=str,
+        help="pretrained_ocr_enc",
+    )
     parser.add_argument("--accelerator", default="gpu", type=str, help="accelerator")
     parser.add_argument(
         "--accumulate_grad_batches",
@@ -53,7 +71,12 @@ def setup_parser():
 if __name__ == "__main__":
     parser = setup_parser()
     args = parser.parse_args()
-    dataset = TextVqaDataset(path="dataset")
+    dataset = TextVqaDataset(
+        path="/home/jovyan/vol-1/BREW-1146/data/TextVQA",
+        pretrained_vit=args.pretrained_img_enc,
+        pretrained_dec=args.pretrained_dec,
+        pretrained_ocr_enc=args.pretrained_ocr_enc,
+    )
     train_loader = DataLoader(
         dataset,
         batch_size=args.train_batch_sizes,
@@ -63,21 +86,23 @@ if __name__ == "__main__":
 
     num_training_samples_per_epoch = len(dataset)
 
-    logger = MLFlowLogger(
-        experiment_name=args.exp_name,
-        tracking_uri=args.mlflow_tracking_uri,
-        save_dir=args.result_path,
-    )
-
     lr_callback = LearningRateMonitor(logging_interval="step")
 
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_metric",
         dirpath=Path(args.result_path) / args.exp_name / args.exp_version,
-        filename="artifacts",
-        save_top_k=1,
-        save_last=False,
-        mode="min",
+    )
+    callbacks = [lr_callback, checkpoint_callback]
+
+    logger = (
+        MLFlowLogger(
+            run_name=args.exp_version,
+            experiment_name=args.exp_name,
+            tracking_uri=args.mlflow_tracking_uri,
+            save_dir=args.result_path,
+            log_model=True,
+        )
+        if args.mlflow_tracking_uri is not None
+        else TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs")
     )
 
     model = LitVqaModel(
@@ -91,5 +116,7 @@ if __name__ == "__main__":
         max_steps=args.max_steps,
         precision=args.precision,
         gradient_clip_val=args.gradient_clip_val,
+        logger=logger,
+        callbacks=callbacks,
     )
     trainer.fit(model=model, train_dataloaders=train_loader)
