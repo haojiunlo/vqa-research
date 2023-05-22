@@ -1,10 +1,12 @@
 import argparse
+import os
 from pathlib import Path
 
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers.mlflow import MLFlowLogger
+from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from src.models.lightning_module import LitVqaModel
@@ -22,7 +24,7 @@ def setup_parser():
     )
     parser.add_argument(
         "--pretrained_dec",
-        default="sshleifer/tiny-mbart",
+        default="sshleifer/student-bart-base-3-3",
         type=str,
         help="pretrained_dec",
     )
@@ -65,26 +67,41 @@ def setup_parser():
         "--val_batch_sizes", default=1, type=int, help="val_batch_sizes"
     )
     parser.add_argument("--warmup_steps", default=500, type=int, help="warmup_steps")
+    parser.add_argument("--fast_dev_run", default=False, type=bool, help="fast_dev_run")
     return parser
 
 
 if __name__ == "__main__":
     parser = setup_parser()
     args = parser.parse_args()
-    dataset = TextVqaDataset(
+    trn_dataset = TextVqaDataset(
         path="/home/jovyan/vol-1/BREW-1146/data/TextVQA",
         pretrained_vit=args.pretrained_img_enc,
         pretrained_dec=args.pretrained_dec,
         pretrained_ocr_enc=args.pretrained_ocr_enc,
+        mode="train",
     )
-    train_loader = DataLoader(
-        dataset,
-        batch_size=args.train_batch_sizes,
-        shuffle=True,
-        collate_fn=CustomDataCollator(dataset.decoder_tokenizer),
+    val_dataset = TextVqaDataset(
+        path="/home/jovyan/vol-1/BREW-1146/data/TextVQA",
+        pretrained_vit=args.pretrained_img_enc,
+        pretrained_dec=args.pretrained_dec,
+        pretrained_ocr_enc=args.pretrained_ocr_enc,
+        mode="val",
     )
 
-    num_training_samples_per_epoch = len(dataset)
+    train_loader = DataLoader(
+        trn_dataset,
+        batch_size=args.train_batch_sizes,
+        shuffle=True,
+        collate_fn=CustomDataCollator(trn_dataset.decoder_tokenizer),
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.val_batch_sizes,
+        collate_fn=CustomDataCollator(val_dataset.decoder_tokenizer),
+    )
+
+    num_training_samples_per_epoch = len(trn_dataset)
 
     lr_callback = LearningRateMonitor(logging_interval="step")
 
@@ -116,7 +133,8 @@ if __name__ == "__main__":
         max_steps=args.max_steps,
         precision=args.precision,
         gradient_clip_val=args.gradient_clip_val,
+        fast_dev_run=args.fast_dev_run,
         logger=logger,
         callbacks=callbacks,
     )
-    trainer.fit(model=model, train_dataloaders=train_loader)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)

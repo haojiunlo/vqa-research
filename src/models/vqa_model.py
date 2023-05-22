@@ -67,7 +67,7 @@ class VQAModel(torch.nn.Module):
     def inference(
         self,
         image_tensors: torch.Tensor,
-        prompt_tensors: torch.Tensor,
+        decoder_input_ids: torch.Tensor,
         ocr_text_tensors: torch.Tensor,
         ocr_text_attention_mask: torch.Tensor,
         bbox_tensor: torch.Tensor,
@@ -91,12 +91,12 @@ class VQAModel(torch.nn.Module):
             encoder_outputs.last_hidden_state = (
                 encoder_outputs.last_hidden_state.unsqueeze(0)
             )
-        if len(prompt_tensors.size()) == 1:
-            prompt_tensors = prompt_tensors.unsqueeze(0)
+        if len(decoder_input_ids.size()) == 1:
+            decoder_input_ids = decoder_input_ids.unsqueeze(0)
 
         # get decoder output
         decoder_output = self.decoder.generate(
-            input_ids=prompt_tensors,
+            input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_outputs,
             max_length=self.decoder.config.max_length,
             early_stopping=True,
@@ -108,9 +108,7 @@ class VQAModel(torch.nn.Module):
 
         output = {"predictions": list()}
         for seq in decoder_tokenizer.batch_decode(decoder_output.sequences):
-            seq = seq.replace(decoder_tokenizer.eos_token, "").replace(
-                decoder_tokenizer.pad_token, ""
-            )
+            seq = seq.replace(decoder_tokenizer.pad_token, "")
             output["predictions"].append(seq)
 
         return output

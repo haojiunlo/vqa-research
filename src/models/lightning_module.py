@@ -24,6 +24,8 @@ class LitVqaModel(pl.LightningModule):
             pretrained_ocr_enc=self.hparams.pretrained_ocr_enc,
         )
 
+        self.validation_step_outputs = []
+
     def on_train_start(self):
         self.logger.log_hyperparams(self.hparams)
 
@@ -39,52 +41,39 @@ class LitVqaModel(pl.LightningModule):
         self.log_dict({"train_loss": loss}, sync_dist=True)
         return loss
 
-    # def validation_step(self, batch, batch_idx, dataset_idx=0):
-    #     preds = self.model.inference(
-    #         image_tensors=batch["image"],
-    #         decoder_input_ids=batch["input_ids"],
-    #         ocr_text_tensors=batch["ocr_text_tensor"],
-    #         ocr_text_attention_mask=batch["ocr_text_attention_mask"],
-    #         bbox_tensor=batch["ocr_bbox"],
-    #         decoder_tokenizer=self.model.decoder_tokenizer
-    #     )["predictions"]
+    def validation_step(self, batch, batch_idx):
+        pred = self.model.inference(
+            image_tensors=batch["image"],
+            decoder_input_ids=batch["input_ids"],
+            ocr_text_tensors=batch["ocr_text_tensor"],
+            ocr_text_attention_mask=batch["ocr_text_attention_mask"],
+            bbox_tensor=batch["ocr_bbox"],
+            decoder_tokenizer=self.model.decoder_tokenizer,
+        )["predictions"][0]
 
-    #     labels = batch["labels"]
-    #     labels = labels[labels == -100] = self.model.decoder_tokenizer.pad_token_id
-    #     answers = self.model.decoder_tokenizer.batch_decode(labels)
+        labels = batch["labels"]
+        labels[labels == -100] = self.model.decoder_tokenizer.pad_token_id
+        answer = self.model.decoder_tokenizer.batch_decode(labels)[0]
 
-    #     scores = list()
-    #     for pred, answer in zip(preds, answers):
-    #         pred = re.sub(r"(?:(?<=>) | (?=</s_))", "", pred)
-    #         answer = re.sub(r"<.*?>", "", answer, count=1)
-    #         answer = answer.replace(self.model.decoder.tokenizer.eos_token, "")
-    #         scores.append(edit_distance(pred, answer) / max(len(pred), len(answer)))
+        pred = re.findall(r"</s>(.*?)</s>", pred)
+        pred = pred[0] if len(pred) > 0 else ""
+        answer = re.sub(r"<.*?>", "", answer, count=1)
+        answer = answer.replace(self.model.decoder_tokenizer.eos_token, "")
+        score = edit_distance(pred, answer) / max(len(pred), len(answer))
 
-    #         if self.config.get("verbose", False) and len(scores) == 1:
-    #             self.print(f"Prediction: {pred}")
-    #             self.print(f"    Answer: {answer}")
-    #             self.print(f" Normed ED: {scores[0]}")
+        self.print(f"Prediction: {pred}")
+        self.print(f"    Answer: {answer}")
+        self.print(f" Normed ED: {score}")
 
-    #     return scores
+        self.validation_step_outputs.append(score)
 
-    # def on_validation_epoch_end(self, validation_step_outputs):
-    #     num_of_loaders = len(self.config.dataset_name_or_paths)
-    #     if num_of_loaders == 1:
-    #         validation_step_outputs = [validation_step_outputs]
-    #     assert len(validation_step_outputs) == num_of_loaders
-    #     cnt = [0] * num_of_loaders
-    #     total_metric = [0] * num_of_loaders
-    #     val_metric = [0] * num_of_loaders
-    #     for i, results in enumerate(validation_step_outputs):
-    #         for scores in results:
-    #             cnt[i] += len(scores)
-    #             total_metric[i] += np.sum(scores)
-    #         val_metric[i] = total_metric[i] / cnt[i]
-    #         val_metric_name = f"val_metric_{i}th_dataset"
-    #         self.log_dict({val_metric_name: val_metric[i]}, sync_dist=True)
-    #     self.log_dict(
-    #         {"val_metric": np.sum(total_metric) / np.sum(cnt)}, sync_dist=True
-    #     )
+        return score
+
+    def on_validation_epoch_end(self):
+        score = np.mean(self.validation_step_outputs)
+
+        self.log_dict({"val_mean_Normed_ED": score}, sync_dist=True)
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         max_iter = None
