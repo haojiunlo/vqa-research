@@ -50,6 +50,7 @@ class LitVqaModel(pl.LightningModule):
             bbox_tensor=batch["ocr_bbox"],
             decoder_tokenizer=self.model.decoder_tokenizer,
         )["predictions"][0]
+        self.print(f"raw Prediction: {pred}")
 
         labels = batch["labels"]
         labels[labels == -100] = self.model.decoder_tokenizer.pad_token_id
