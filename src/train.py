@@ -136,6 +136,9 @@ if __name__ == "__main__":
         trn_dataset.decoder_tokenizer,
     )
 
+    # pytorch 2.0 feature
+    compiled_model = torch.compile(model)
+
     trainer = pl.Trainer(
         accelerator=args.accelerator,
         accumulate_grad_batches=args.accumulate_grad_batches,
