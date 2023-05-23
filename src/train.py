@@ -122,7 +122,7 @@ if __name__ == "__main__":
             experiment_name=args.exp_name,
             tracking_uri=args.mlflow_tracking_uri,
             save_dir=args.result_path,
-            log_model=True,
+            log_model=False,
         )
         if args.mlflow_tracking_uri is not None
         else TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs")
