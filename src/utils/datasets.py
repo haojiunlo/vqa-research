@@ -112,7 +112,7 @@ class TextVqaDataset(Dataset):
             self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
         else:
             self.decoder_tokenizer = pretrained_dec
-        if not self.decoder_tokenizer:
+        if not self.decoder_tokenizer.pad_token:
             self.decoder_tokenizer.add_special_tokens({"pad_token": "<pad>"})
         self.decoder_tokenizer.add_special_tokens(
             {
