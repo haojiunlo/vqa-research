@@ -17,6 +17,12 @@ from src.utils.datasets import CustomDataCollator, TextVqaDataset
 def setup_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--dataset_path",
+        default="/home/jovyan/vol-1/BREW-1146/data/TextVQA",
+        type=str,
+        help="dataset_path",
+    )
+    parser.add_argument(
         "--pretrained_img_enc",
         default="google/vit-base-patch16-224",
         type=str,
@@ -81,14 +87,14 @@ if __name__ == "__main__":
     parser = setup_parser()
     args = parser.parse_args()
     trn_dataset = TextVqaDataset(
-        path="/home/jovyan/vol-1/BREW-1146/data/TextVQA",
+        path=args.dataset_path,
         pretrained_vit=args.pretrained_img_enc,
         pretrained_dec=args.pretrained_dec,
         pretrained_ocr_enc=args.pretrained_ocr_enc,
         mode="train",
     )
     val_dataset = TextVqaDataset(
-        path="/home/jovyan/vol-1/BREW-1146/data/TextVQA",
+        path=args.dataset_path,
         pretrained_vit=args.pretrained_img_enc,
         pretrained_dec=trn_dataset.decoder_tokenizer,
         pretrained_ocr_enc=args.pretrained_ocr_enc,

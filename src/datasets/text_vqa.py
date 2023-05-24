@@ -1,9 +1,10 @@
 import json
 import os
 from collections import Counter
+from typing import Union
 
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import AutoImageProcessor, AutoTokenizer, PreTrainedTokenizer
 
 from src.datasets.collators import CustomDataCollator, collate_batch
 from src.datasets.common import OcrInfo, VqaSample, vqa_sample_2_tensor
@@ -15,7 +16,9 @@ class TextVqaDataset(Dataset):
         path: str,
         mode: str = "train",
         pretrained_vit: str = "google/vit-base-patch16-224",
-        pretrained_dec: str = "sshleifer/tiny-mbart",
+        pretrained_dec: Union[
+            PreTrainedTokenizer, str
+        ] = "sshleifer/student-bart-base-3-3",
         max_len: int = 128,
         pretrained_ocr_enc: str = "microsoft/layoutlm-base-uncased",
         hash_embed_n_tok: int = 6000,  # Number of rows in the embedding
