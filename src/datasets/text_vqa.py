@@ -39,7 +39,10 @@ class TextVqaDataset(Dataset):
 
         self.image_processor = AutoImageProcessor.from_pretrained(pretrained_vit)
 
-        self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        if isinstance(pretrained_dec, str):
+            self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        else:
+            self.decoder_tokenizer = pretrained_dec
         self.decoder_tokenizer.add_special_tokens(
             {
                 "additional_special_tokens": [
