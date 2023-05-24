@@ -5,7 +5,7 @@ from collections import Counter
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoImageProcessor, AutoTokenizer
 
-from src.datasets.collators import collate_batch
+from src.datasets.collators import CustomDataCollator, collate_batch
 from src.datasets.common import OcrInfo, VqaSample, vqa_sample_2_tensor
 
 
@@ -13,6 +13,7 @@ class TextVqaDataset(Dataset):
     def __init__(
         self,
         path: str,
+        mode: str = "train",
         pretrained_vit: str = "google/vit-base-patch16-224",
         pretrained_dec: str = "sshleifer/tiny-mbart",
         max_len: int = 128,
@@ -21,9 +22,34 @@ class TextVqaDataset(Dataset):
         hash_embed_n_hash: int = 4,  # Number of hash functions
     ):
         self.base_path = path
+        self.mode = mode
+        if self.mode == "train":
+            self.input_folder = "TextVQA_0.5.1_train.json"
+            self.ocr_folder = "TextVQA_Rosetta_OCR_v0.2_train.json"
+            self.image_folder = "train_images"
+        elif self.mode == "val":
+            self.input_folder = "TextVQA_0.5.1_val.json"
+            self.ocr_folder = "TextVQA_Rosetta_OCR_v0.2_val.json"
+            self.image_folder = "train_images"
+        else:
+            raise NotImplementedError("model should be one of `train` or `val`")
+
         self.image_processor = AutoImageProcessor.from_pretrained(pretrained_vit)
+
         self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        self.decoder_tokenizer.add_special_tokens(
+            {
+                "additional_special_tokens": [
+                    "<s_ocr>",
+                    "</s_ocr>",
+                    "<s_q>",
+                    "</s_q>",
+                    "<s_a>",
+                ]
+            }
+        )
         self.max_length = max_len
+
         self.pretrained_ocr_enc = pretrained_ocr_enc
         if pretrained_ocr_enc is not None:
             self.ocr_text_tokenizer = AutoTokenizer.from_pretrained(
@@ -31,19 +57,22 @@ class TextVqaDataset(Dataset):
             )
         else:
             self.ocr_text_tokenizer = None
+
         self.hash_embed_n_tok = hash_embed_n_tok
         self.hash_embed_n_hash = hash_embed_n_hash
 
-        with open(os.path.join(path, "TextVQA_0.5.1_train.json"), "r") as f:
+        with open(os.path.join(path, self.input_folder), "r") as f:
             data = json.load(f)
 
-        with open(os.path.join(path, "TextVQA_Rosetta_OCR_v0.2_train.json"), "r") as f:
+        with open(os.path.join(path, self.ocr_folder), "r") as f:
             ocr_data = json.load(f)
 
         img_data = [
             {
                 "question": x["question"],
-                "answer": Counter(x["answers"]).most_common(1)[0][0],
+                "answer": Counter(x.get("answers", ["no answer provided"])).most_common(
+                    1
+                )[0][0],
                 "image_id": x["image_id"],
             }
             for x in data["data"]
@@ -76,10 +105,10 @@ class TextVqaDataset(Dataset):
                         x["word"],
                         int(1000 * x["w"]) + 1,
                         int(1000 * x["h"]) + 1,
-                        int(1000 * x["x0"]) + 1,
-                        int(1000 * x["y0"]) + 1,
-                        int(1000 * x["x0"]) + int(1000 * x["w"]) + 1,
-                        int(1000 * x["y0"]) + int(1000 * x["h"]) + 1,
+                        max(0, min(1000, int(1000 * x["x0"]))) + 1,
+                        max(0, min(1000, int(1000 * x["y0"]))) + 1,
+                        max(0, min(1000, int(1000 * x["x0"]) + int(1000 * x["w"]))) + 1,
+                        max(0, min(1000, int(1000 * x["y0"]) + int(1000 * x["h"]))) + 1,
                     )
                     for x in imgid2ocr.get(v["image_id"])
                 ],
@@ -102,6 +131,7 @@ class TextVqaDataset(Dataset):
             self.ocr_text_tokenizer,
             self.hash_embed_n_tok,
             self.hash_embed_n_hash,
+            self.mode,
         )
 
 
@@ -110,6 +140,6 @@ if __name__ == "__main__":
     sample = ds[100]
     print(sample)
 
-    dl = DataLoader(ds, batch_size=5, shuffle=True, collate_fn=collate_batch)
+    dl = DataLoader(ds, batch_size=5, shuffle=True, collate_fn=CustomDataCollator())
     for batch in dl:
         print(batch)

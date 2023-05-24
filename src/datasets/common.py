@@ -33,34 +33,58 @@ def prep_decoder_input_v1(vqa_sample: VqaSample, decoder_tokenizer, max_len: int
     return {"question": question_tensor, "answer": answer_tensor}
 
 
-def prep_decoder_input_v2(vqa_sample: VqaSample, decoder_tokenizer, max_len: int):
+def prep_decoder_input_v2(
+    vqa_sample: VqaSample, decoder_tokenizer, max_len: int, mode: str
+):
     # v2
     q_ids = decoder_tokenizer(
         vqa_sample.question,
         max_length=max_len,
         truncation=True,
+        add_special_tokens=False,
     ).input_ids
 
-    a_ids = decoder_tokenizer(
-        vqa_sample.question,
-        text_pair=vqa_sample.answer,
-        max_length=max_len,
-        truncation=True,
-    ).input_ids
+    if mode == "train":
+        a_ids = decoder_tokenizer(
+            vqa_sample.question,
+            text_pair=vqa_sample.answer,
+            max_length=max_len,
+            truncation=True,
+            add_special_tokens=False,
+        ).input_ids
 
-    input_ids = (
-        [decoder_tokenizer.bos_token_id]
-        + q_ids
-        + [decoder_tokenizer.eos_token_id]
-        + a_ids
-        + [decoder_tokenizer.eos_token_id]
-    )
+        input_ids = (
+            [decoder_tokenizer.additional_special_tokens_ids[2]]
+            + q_ids
+            + [decoder_tokenizer.additional_special_tokens_ids[3]]
+            + [decoder_tokenizer.additional_special_tokens_ids[4]]
+            + a_ids
+            + [decoder_tokenizer.eos_token_id]
+        )
 
-    # model doesn't need to predict prompt (for VQA)
-    labels = [
-        id if i > input_ids.index(decoder_tokenizer.eos_token_id) else -100
-        for i, id in enumerate(input_ids)
-    ]
+        # model doesn't need to predict prompt (for VQA)
+        labels = [
+            _id
+            if i > input_ids.index(decoder_tokenizer.additional_special_tokens_ids[4])
+            else -100
+            for i, _id in enumerate(input_ids)
+        ]
+
+    elif mode == "val":
+        input_ids = (
+            [decoder_tokenizer.additional_special_tokens_ids[2]]
+            + q_ids
+            + [decoder_tokenizer.additional_special_tokens_ids[3]]
+            + [decoder_tokenizer.additional_special_tokens_ids[4]]
+        )
+        labels = decoder_tokenizer(
+            vqa_sample.answer,
+            max_length=max_len,
+            truncation=True,
+            add_special_tokens=False,
+        ).input_ids
+    else:
+        raise NotImplementedError()
 
     return {"input_ids": input_ids, "labels": labels}
 
@@ -164,11 +188,13 @@ def vqa_sample_2_tensor(
     # OCR2
     hash_embed_n_tok: int,
     hash_embed_n_hash: int,
+    # Val or Train
+    mode: str,
 ):
     # TODO -- redesign the way this works
     # Idea: each model makes their own `prepare_input` function
     # Tokenize question and answer using the decoders tokenizer
-    decoder_input = prep_decoder_input_v1(vqa_sample, decoder_tokenizer, max_len)
+    decoder_input = prep_decoder_input_v2(vqa_sample, decoder_tokenizer, max_len, mode)
 
     # Preprocess the image
     image_input = prepare_image_input(img_path, image_processor)
