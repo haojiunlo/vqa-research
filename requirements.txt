@@ -1,0 +1,6 @@
+transformers==4.29.2
+mmh3==4.0.0
+nltk==3.8.1
+torch==2.0.0
+lightning==2.0.2
+mlflow>=1.0.0
