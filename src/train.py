@@ -7,7 +7,6 @@ import torch
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers.mlflow import MLFlowLogger
 from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
-from lightning.pytorch.tuner.tuning import Tuner
 from torch.utils.data import DataLoader
 
 from src.models.lightning_module import LitVqaModel
@@ -138,7 +137,7 @@ if __name__ == "__main__":
     )
 
     # pytorch 2.0 feature
-    model = torch.compile(model)
+    # model = torch.compile(model)
 
     trainer = pl.Trainer(
         accelerator=args.accelerator,
@@ -152,5 +151,7 @@ if __name__ == "__main__":
         logger=logger,
         callbacks=callbacks,
         limit_val_batches=10,
+        # overfit_batches=0.05
     )
+
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
