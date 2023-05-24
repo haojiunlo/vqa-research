@@ -10,6 +10,10 @@ from transformers import (
 )
 from transformers.file_utils import ModelOutput
 
+from src.utils.custom_modeling_gpt_neo import (
+    GPTNeoForCausalLM as CustomGPTNeoForCausalLM,
+)
+
 # TODO: OCR encoder, custom VisionEncoderDecoderModel that has vit, ocr encoder and bart decoder, \
 # custom processor to process ocr output text, input text and image
 
@@ -26,7 +30,10 @@ class VQAModel(torch.nn.Module):
         self.img_encoder = AutoModel.from_pretrained(pretrained_img_enc)
         self.ocr_encoder = AutoModel.from_pretrained(pretrained_ocr_enc)
         # TODO: intergrate with ocr_embedding
-        self.decoder = AutoModelForCausalLM.from_pretrained(pretrained_dec)
+        if "gpt-neo" in pretrained_dec.lower():
+            self.decoder = CustomGPTNeoForCausalLM.from_pretrained(pretrained_dec)
+        else:
+            self.decoder = AutoModelForCausalLM.from_pretrained(pretrained_dec)
         self.decoder_tokenizer = dec_tokenizer
         self.decoder.resize_token_embeddings(len(self.decoder_tokenizer))
 

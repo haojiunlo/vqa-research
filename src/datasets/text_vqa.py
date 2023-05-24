@@ -111,9 +111,13 @@ class TextVqaDataset(Dataset):
                         x["word"],
                         int(1000 * x["w"]),
                         int(1000 * x["h"]),
-                        max(0, min(1000, int(1000 * x["x0"]))),
+                        max(
+                            0, min(1000, int(1000 * x["x0"]))
+                        ),  # prevent index out of bounds
                         max(0, min(1000, int(1000 * x["y0"]))),
-                        max(0, min(1000, int(1000 * x["x0"]) + int(1000 * x["w"]))),
+                        max(
+                            0, min(1000, int(1000 * x["x0"]) + int(1000 * x["w"]))
+                        ),  # prevent index out of bounds
                         max(0, min(1000, int(1000 * x["y0"]) + int(1000 * x["h"]))),
                     )
                     for x in imgid2ocr.get(v["image_id"])
