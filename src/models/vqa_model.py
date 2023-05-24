@@ -55,6 +55,7 @@ class VQAModel(torch.nn.Module):
         self,
         image_tensors: torch.Tensor,
         decoder_input_ids: torch.Tensor,
+        decoder_input_attention_mask: torch.Tensor,
         ocr_text_tensors: torch.Tensor,
         ocr_text_attention_mask: torch.Tensor,
         bbox: torch.Tensor,
@@ -74,6 +75,7 @@ class VQAModel(torch.nn.Module):
 
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
+            attention_mask=decoder_input_attention_mask,
             encoder_hidden_states=encoder_hidden_states,
             labels=decoder_labels,
         )
@@ -83,6 +85,7 @@ class VQAModel(torch.nn.Module):
         self,
         image_tensors: torch.Tensor,
         decoder_input_ids: torch.Tensor,
+        decoder_input_attention_mask: torch.Tensor,
         ocr_text_tensors: torch.Tensor,
         ocr_text_attention_mask: torch.Tensor,
         bbox_tensor: torch.Tensor,
@@ -112,6 +115,7 @@ class VQAModel(torch.nn.Module):
         # get decoder output
         decoder_output = self.decoder.generate(
             input_ids=decoder_input_ids,
+            attention_mask=decoder_input_attention_mask,
             encoder_hidden_states=encoder_outputs,
             max_length=64,
             early_stopping=True,
