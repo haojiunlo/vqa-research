@@ -109,12 +109,12 @@ class TextVqaDataset(Dataset):
                     # FIXME -- make sure these are between 0 and 1000
                     OcrInfo(
                         x["word"],
-                        int(1000 * x["w"]) + 1,
-                        int(1000 * x["h"]) + 1,
-                        max(0, min(1000, int(1000 * x["x0"]))) + 1,
-                        max(0, min(1000, int(1000 * x["y0"]))) + 1,
-                        max(0, min(1000, int(1000 * x["x0"]) + int(1000 * x["w"]))) + 1,
-                        max(0, min(1000, int(1000 * x["y0"]) + int(1000 * x["h"]))) + 1,
+                        int(1000 * x["w"]),
+                        int(1000 * x["h"]),
+                        max(0, min(1000, int(1000 * x["x0"]))),
+                        max(0, min(1000, int(1000 * x["y0"]))),
+                        max(0, min(1000, int(1000 * x["x0"]) + int(1000 * x["w"]))),
+                        max(0, min(1000, int(1000 * x["y0"]) + int(1000 * x["h"]))),
                     )
                     for x in imgid2ocr.get(v["image_id"])
                 ],
