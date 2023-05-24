@@ -7,6 +7,7 @@ import torch
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers.mlflow import MLFlowLogger
 from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
+from lightning.pytorch.tuner.tuning import Tuner
 from torch.utils.data import DataLoader
 
 from src.models.lightning_module import LitVqaModel
@@ -58,13 +59,13 @@ def setup_parser():
     parser.add_argument("--max_steps", default=-1, type=int, help="max steps")
     parser.add_argument("--precision", default=16, type=int, help="prcision")
     parser.add_argument(
-        "--gradient_clip_val", default=None, type=float, help="Gradient clipping value"
+        "--gradient_clip_val", default=1.0, type=float, help="Gradient clipping value"
     )
     parser.add_argument(
         "--train_batch_sizes", default=8, type=int, help="train_batch_sizes"
     )
     parser.add_argument(
-        "--val_batch_sizes", default=8, type=int, help="val_batch_sizes"
+        "--val_batch_sizes", default=1, type=int, help="val_batch_sizes"
     )
     parser.add_argument(
         "--val_check_interval",
@@ -72,7 +73,7 @@ def setup_parser():
         type=float,
         help="How often within one training epoch to check the validation set",
     )
-    parser.add_argument("--warmup_steps", default=500, type=int, help="warmup_steps")
+    parser.add_argument("--warmup_steps", default=50, type=int, help="warmup_steps")
     parser.add_argument("--fast_dev_run", default=False, type=bool, help="fast_dev_run")
     return parser
 
@@ -137,7 +138,7 @@ if __name__ == "__main__":
     )
 
     # pytorch 2.0 feature
-    compiled_model = torch.compile(model)
+    model = torch.compile(model)
 
     trainer = pl.Trainer(
         accelerator=args.accelerator,
@@ -150,5 +151,6 @@ if __name__ == "__main__":
         val_check_interval=args.val_check_interval,
         logger=logger,
         callbacks=callbacks,
+        limit_val_batches=10,
     )
     trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)

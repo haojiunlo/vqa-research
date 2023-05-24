@@ -37,6 +37,11 @@ class VQAModel(torch.nn.Module):
                 self.decoder.config.hidden_size,
             ),
             torch.nn.ReLU(),
+            torch.nn.Linear(
+                self.decoder.config.hidden_size,
+                self.decoder.config.hidden_size,
+            ),
+            torch.nn.ReLU(),
         )
 
     def forward(
@@ -101,7 +106,7 @@ class VQAModel(torch.nn.Module):
         decoder_output = self.decoder.generate(
             input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_outputs,
-            max_length=self.decoder.config.max_length,
+            max_length=64,
             early_stopping=True,
             use_cache=True,
             num_beams=1,

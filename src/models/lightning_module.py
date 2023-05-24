@@ -10,6 +10,8 @@ from torch.optim.lr_scheduler import LambdaLR
 
 from src.models.vqa_model import VQAModel
 
+# from transformers import AutoTokenizer
+
 
 class LitVqaModel(pl.LightningModule):
     def __init__(self, args, dec_tokenizer):
@@ -24,6 +26,9 @@ class LitVqaModel(pl.LightningModule):
             pretrained_ocr_enc=self.hparams.pretrained_ocr_enc,
             dec_tokenizer=dec_tokenizer,
         )
+        # self.ocr_tokenizer = AutoTokenizer.from_pretrained(
+        #     self.hparams.pretrained_ocr_enc
+        # )
 
         self.validation_step_outputs = []
 
@@ -31,6 +36,11 @@ class LitVqaModel(pl.LightningModule):
         self.logger.log_hyperparams(self.hparams)
 
     def training_step(self, batch, batch_idx):
+        # print(f"ocr text: {self.ocr_tokenizer.batch_decode(batch['ocr_text_tensor'])}".replace("[PAD]", ""))
+        # print(f"input_ids: {self.model.decoder_tokenizer.batch_decode(batch['input_ids'])}")
+        # labels = batch["labels"]
+        # labels[labels == -100] = self.model.decoder_tokenizer.pad_token_id
+        # print(f"label: {self.model.decoder_tokenizer.batch_decode(labels)}")
         loss = self.model(
             image_tensors=batch["image"],
             decoder_input_ids=batch["input_ids"],
@@ -51,6 +61,7 @@ class LitVqaModel(pl.LightningModule):
             bbox_tensor=batch["ocr_bbox"],
             decoder_tokenizer=self.model.decoder_tokenizer,
         )["predictions"]
+        print(preds)
 
         labels = batch["labels"]
         labels[labels == -100] = self.model.decoder_tokenizer.pad_token_id
@@ -60,7 +71,7 @@ class LitVqaModel(pl.LightningModule):
         for pred, answer in zip(preds, answers):
             pred = re.findall(
                 r"{}(.*?){}".format(
-                    self.model.decoder_tokenizer.sep_token,
+                    "<s_a>",
                     self.model.decoder_tokenizer.eos_token,
                 ),
                 pred,
