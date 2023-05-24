@@ -10,20 +10,37 @@ from torch.optim.lr_scheduler import LambdaLR
 
 from src.models.vqa_model import VQAModel
 
+# from transformers import AutoTokenizer
+
 
 class LitVqaModel(pl.LightningModule):
-    def __init__(self, args):
+    def __init__(self, args, dec_tokenizer):
         super().__init__()
-        self.model = VQAModel()
-        self.lr = args["learning_rate"]
-        self.train_batch_sizes = args["train_batch_sizes"]
-        self.max_epochs = args["max_epochs"]
-        self.max_steps = args["max_steps"]
-        self.warmup_steps = args["warmup_steps"]
-        self.num_training_samples_per_epoch = args["num_training_samples_per_epoch"]
-        self.accelerator = args["accelerator"]
+        # call this to save hyperparameters to the checkpoint
+        self.save_hyperparameters(args)
+
+        # Now possible to access hyperparameters from hparams
+        self.model = VQAModel(
+            pretrained_img_enc=self.hparams.pretrained_img_enc,
+            pretrained_dec=self.hparams.pretrained_dec,
+            pretrained_ocr_enc=self.hparams.pretrained_ocr_enc,
+            dec_tokenizer=dec_tokenizer,
+        )
+        # self.ocr_tokenizer = AutoTokenizer.from_pretrained(
+        #     self.hparams.pretrained_ocr_enc
+        # )
+
+        self.validation_step_outputs = []
+
+    def on_train_start(self):
+        self.logger.log_hyperparams(self.hparams)
 
     def training_step(self, batch, batch_idx):
+        # print(f"ocr text: {self.ocr_tokenizer.batch_decode(batch['ocr_text_tensor'])}".replace("[PAD]", ""))
+        # print(f"input_ids: {self.model.decoder_tokenizer.batch_decode(batch['input_ids'])}")
+        # labels = batch["labels"]
+        # labels[labels == -100] = self.model.decoder_tokenizer.pad_token_id
+        # print(f"label: {self.model.decoder_tokenizer.batch_decode(labels)}")
         loss = self.model(
             image_tensors=batch["image"],
             decoder_input_ids=batch["input_ids"],
@@ -31,78 +48,78 @@ class LitVqaModel(pl.LightningModule):
             ocr_text_attention_mask=batch["ocr_text_attention_mask"],
             bbox=batch["ocr_bbox"],
             decoder_labels=batch["labels"],
-        )[0]
-        self.log_dict({"train_loss": loss}, sync_dist=True)
+        ).loss
+        self.log_dict({"train_loss": loss}, sync_dist=True, prog_bar=True)
         return loss
 
-    # def validation_step(self, batch, batch_idx, dataset_idx=0):
-    #     preds = self.model.inference(
-    #         image_tensors=batch["image"],
-    #         decoder_input_ids=batch["input_ids"],
-    #         ocr_text_tensors=batch["ocr_text_tensor"],
-    #         ocr_text_attention_mask=batch["ocr_text_attention_mask"],
-    #         bbox_tensor=batch["ocr_bbox"],
-    #         decoder_tokenizer=self.model.decoder_tokenizer
-    #     )["predictions"]
+    def validation_step(self, batch, batch_idx):
+        preds = self.model.inference(
+            image_tensors=batch["image"],
+            decoder_input_ids=batch["input_ids"],
+            ocr_text_tensors=batch["ocr_text_tensor"],
+            ocr_text_attention_mask=batch["ocr_text_attention_mask"],
+            bbox_tensor=batch["ocr_bbox"],
+            decoder_tokenizer=self.model.decoder_tokenizer,
+        )["predictions"]
+        print(preds)
 
-    #     labels = batch["labels"]
-    #     labels = labels[labels == -100] = self.model.decoder_tokenizer.pad_token_id
-    #     answers = self.model.decoder_tokenizer.batch_decode(labels)
+        labels = batch["labels"]
+        labels[labels == -100] = self.model.decoder_tokenizer.pad_token_id
+        answers = self.model.decoder_tokenizer.batch_decode(labels)
 
-    #     scores = list()
-    #     for pred, answer in zip(preds, answers):
-    #         pred = re.sub(r"(?:(?<=>) | (?=</s_))", "", pred)
-    #         answer = re.sub(r"<.*?>", "", answer, count=1)
-    #         answer = answer.replace(self.model.decoder.tokenizer.eos_token, "")
-    #         scores.append(edit_distance(pred, answer) / max(len(pred), len(answer)))
+        scores = []
+        for pred, answer in zip(preds, answers):
+            pred = re.findall(
+                r"{}(.*?){}".format(
+                    "<s_a>",
+                    self.model.decoder_tokenizer.eos_token,
+                ),
+                pred,
+            )
+            pred = pred[0] if len(pred) > 0 else ""
+            answer = answer.replace(self.model.decoder_tokenizer.eos_token, "").replace(
+                self.model.decoder_tokenizer.pad_token, ""
+            )
+            scores.append(edit_distance(pred, answer) / max(len(pred), len(answer)))
 
-    #         if self.config.get("verbose", False) and len(scores) == 1:
-    #             self.print(f"Prediction: {pred}")
-    #             self.print(f"    Answer: {answer}")
-    #             self.print(f" Normed ED: {scores[0]}")
+            if len(scores) == 1:
+                self.print(f"Prediction: {pred}")
+                self.print(f"    Answer: {answer}")
+                self.print(f" Normed ED: {scores[0]}")
 
-    #     return scores
+        self.validation_step_outputs.extend(scores)
 
-    # def on_validation_epoch_end(self, validation_step_outputs):
-    #     num_of_loaders = len(self.config.dataset_name_or_paths)
-    #     if num_of_loaders == 1:
-    #         validation_step_outputs = [validation_step_outputs]
-    #     assert len(validation_step_outputs) == num_of_loaders
-    #     cnt = [0] * num_of_loaders
-    #     total_metric = [0] * num_of_loaders
-    #     val_metric = [0] * num_of_loaders
-    #     for i, results in enumerate(validation_step_outputs):
-    #         for scores in results:
-    #             cnt[i] += len(scores)
-    #             total_metric[i] += np.sum(scores)
-    #         val_metric[i] = total_metric[i] / cnt[i]
-    #         val_metric_name = f"val_metric_{i}th_dataset"
-    #         self.log_dict({val_metric_name: val_metric[i]}, sync_dist=True)
-    #     self.log_dict(
-    #         {"val_metric": np.sum(total_metric) / np.sum(cnt)}, sync_dist=True
-    #     )
+    def on_validation_epoch_end(self):
+        score = np.mean(self.validation_step_outputs)
+
+        self.log_dict({"val_mean_Normed_ED": score}, sync_dist=True, prog_bar=True)
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         max_iter = None
 
-        if self.max_epochs > 0:
-            max_iter = (self.max_epochs * self.num_training_samples_per_epoch) / (
-                self.train_batch_sizes * torch.cuda.device_count()
-                if self.accelerator == "gpu"
+        if self.hparams.max_epochs > 0:
+            max_iter = (
+                self.hparams.max_epochs * self.hparams.num_training_samples_per_epoch
+            ) / (
+                self.hparams.train_batch_sizes * torch.cuda.device_count()
+                if self.hparams.accelerator == "gpu"
                 else 1
             )
 
-        if self.max_steps > 0:
+        if self.hparams.max_steps > 0:
             max_iter = (
-                min(self.max_steps, max_iter)
+                min(self.hparams.max_steps, max_iter)
                 if max_iter is not None
-                else self.max_steps
+                else self.hparams.max_steps
             )
 
         # assert max_iter is not None
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
         scheduler = {
-            "scheduler": self.cosine_scheduler(optimizer, max_iter, self.warmup_steps),
+            "scheduler": self.cosine_scheduler(
+                optimizer, max_iter, self.hparams.warmup_steps
+            ),
             "name": "learning_rate",
             "interval": "step",
         }

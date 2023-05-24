@@ -2,7 +2,7 @@ import json
 import os
 from collections import Counter, namedtuple
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Union
 
 import numpy as np
 import torch
@@ -10,7 +10,7 @@ import transformers
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import AutoImageProcessor, AutoTokenizer, PreTrainedTokenizer
 
 from src.models.hash_embedding import HashEmbedding
 
@@ -97,14 +97,34 @@ class TextVqaDataset(Dataset):
         self,
         path: str = "data/TextVQA",
         pretrained_vit: str = "google/vit-base-patch16-224",
-        pretrained_dec: str = "sshleifer/tiny-mbart",
+        pretrained_dec: Union[
+            PreTrainedTokenizer, str
+        ] = "sshleifer/student-bart-base-3-3",
         pretrained_ocr_enc: str = "microsoft/layoutlm-base-uncased",
+        mode: str = "train",
+        dec_tokenizer: PreTrainedTokenizer = None,
         hash_embed_n_tok: int = 6000,  # Number of rows in the embedding
         hash_embed_n_hash: int = 4,  # Number of hash functions
     ):
         self.base_path = path
         self.image_processor = AutoImageProcessor.from_pretrained(pretrained_vit)
-        self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        if isinstance(pretrained_dec, str):
+            self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        else:
+            self.decoder_tokenizer = pretrained_dec
+        # self.decoder_tokenizer.add_special_tokens({"sep_token": "<sep>"})
+        self.decoder_tokenizer.add_special_tokens(
+            {
+                "additional_special_tokens": [
+                    "<s_ocr>",
+                    "</s_ocr>",
+                    "<s_q>",
+                    "</s_q>",
+                    "<s_a>",
+                ]
+            }
+        )
+        self.mode = mode
 
         self.pretrained_ocr_enc = pretrained_ocr_enc
         if pretrained_ocr_enc is not None:
@@ -115,10 +135,21 @@ class TextVqaDataset(Dataset):
             self.hash_embed_n_tok = hash_embed_n_tok
             self.hash_embed_n_hash = hash_embed_n_hash
 
-        with open(os.path.join(path, "TextVQA_0.5.1_train.json"), "r") as f:
+        if self.mode == "train":
+            self.input_folder = "TextVQA_0.5.1_train.json"
+            self.ocr_folder = "TextVQA_Rosetta_OCR_v0.2_train.json"
+            self.image_folder = "train_images"
+        elif self.mode == "val":
+            self.input_folder = "TextVQA_0.5.1_val.json"
+            self.ocr_folder = "TextVQA_Rosetta_OCR_v0.2_val.json"
+            self.image_folder = "train_images"
+        else:
+            raise NotImplementedError("model should be one of `train` or `val`")
+
+        with open(os.path.join(path, self.input_folder), "r") as f:
             data = json.load(f)
 
-        with open(os.path.join(path, "TextVQA_Rosetta_OCR_v0.2_train.json"), "r") as f:
+        with open(os.path.join(path, self.ocr_folder), "r") as f:
             ocr_data = json.load(f)
 
         img_data = [
@@ -178,37 +209,95 @@ class TextVqaDataset(Dataset):
 
     def __getitem__(self, idx):
         vqa_sample = self.samples[idx]
+        ocr_text = [x.word for x in vqa_sample.ocr_info]
 
-        # Tokenize question and answer using the decoders tokenizer
-        q_ids = self.decoder_tokenizer(
-            vqa_sample.question,
-            max_length=128,  # TODO -- don't hardcode this
-            truncation=True,
-        ).input_ids
-        a_ids = self.decoder_tokenizer(
-            vqa_sample.question,
-            text_pair=vqa_sample.answer,
-            max_length=128,  # TODO -- don't hardcode this
-            truncation=True,
-        ).input_ids
-        input_ids = (
-            [self.decoder_tokenizer.bos_token_id]
-            + q_ids
-            + [self.decoder_tokenizer.eos_token_id]
-            + a_ids
-            + [self.decoder_tokenizer.eos_token_id]
-        )
+        if self.mode == "train":
+            # experiment with ocr input
+            # ocr_ids = self.decoder_tokenizer(
+            #     " ".join(ocr_text),
+            #     max_length=128,  # TODO -- don't hardcode this
+            #     truncation=True,
+            #     add_special_tokens=False,
+            # ).input_ids
+
+            # Tokenize question and answer using the decoders tokenizer
+            q_ids = self.decoder_tokenizer(
+                vqa_sample.question,
+                max_length=128,  # TODO -- don't hardcode this
+                truncation=True,
+                add_special_tokens=False,
+            ).input_ids
+            a_ids = self.decoder_tokenizer(
+                vqa_sample.answer,
+                max_length=128,  # TODO -- don't hardcode this
+                truncation=True,
+                add_special_tokens=False,
+            ).input_ids
+            input_ids = (
+                # [self.decoder_tokenizer.additional_special_tokens_ids[0]]
+                # + ocr_ids
+                # + [self.decoder_tokenizer.additional_special_tokens_ids[1]]
+                [self.decoder_tokenizer.additional_special_tokens_ids[2]]
+                + q_ids
+                + [self.decoder_tokenizer.additional_special_tokens_ids[3]]
+                + [self.decoder_tokenizer.additional_special_tokens_ids[4]]
+                + a_ids
+                + [self.decoder_tokenizer.eos_token_id]
+            )
+            labels = [
+                token_id
+                if i
+                > input_ids.index(
+                    self.decoder_tokenizer.additional_special_tokens_ids[4]
+                )
+                else -100
+                for i, token_id in enumerate(input_ids)
+            ]
+            # labels = input_ids
+            # model doesn't need to predict prompt (for VQA)
+        elif self.mode == "val":
+            # experiment with ocr input
+            ocr_ids = self.decoder_tokenizer(
+                " ".join(ocr_text),
+                max_length=128,  # TODO -- don't hardcode this
+                truncation=True,
+                add_special_tokens=False,
+            ).input_ids
+
+            q_ids = self.decoder_tokenizer(
+                vqa_sample.question,
+                max_length=128,  # TODO -- don't hardcode this
+                truncation=True,
+                add_special_tokens=False,
+            ).input_ids
+            input_ids = (
+                # [self.decoder_tokenizer.additional_special_tokens_ids[0]]
+                # + ocr_ids
+                # + [self.decoder_tokenizer.additional_special_tokens_ids[1]]
+                [self.decoder_tokenizer.additional_special_tokens_ids[2]]
+                + q_ids
+                + [self.decoder_tokenizer.additional_special_tokens_ids[3]]
+                + [self.decoder_tokenizer.additional_special_tokens_ids[4]]
+            )
+            labels = self.decoder_tokenizer(
+                vqa_sample.answer,
+                max_length=128,  # TODO -- don't hardcode this
+                truncation=True,
+                add_special_tokens=False,
+            ).input_ids
 
         # Preprocess the image
         im = Image.open(
-            os.path.join(self.base_path, "train_images", f"{vqa_sample.image_id}.jpg")
+            os.path.join(
+                self.base_path, self.image_folder, f"{vqa_sample.image_id}.jpg"
+            )
         )
         im = im.convert("RGB")
         image_tensor = self.image_processor(
             im, return_tensors="pt"
         ).pixel_values.squeeze(0)
         if self.pretrained_ocr_enc:
-            ocr_text = [x.word for x in vqa_sample.ocr_info]
+            # ocr_text = [x.word for x in vqa_sample.ocr_info]
             normalized_word_boxes = [
                 [x.x0, x.y0, x.x1, x.y1] for x in vqa_sample.ocr_info
             ]
@@ -243,12 +332,6 @@ class TextVqaDataset(Dataset):
             )
             ocr_text_input_ids = ocr_text_input["input_ids"].squeeze(0)
             ocr_text_attention_mask = ocr_text_input["attention_mask"].squeeze(0)
-
-            labels = [
-                id if i > input_ids.index(self.decoder_tokenizer.eos_token_id) else -100
-                for i, id in enumerate(input_ids)
-            ]
-            # model doesn't need to predict prompt (for VQA)
 
             return {
                 "input_ids": input_ids,
@@ -300,9 +383,17 @@ class TextVqaDataset(Dataset):
 
 
 if __name__ == "__main__":
-    ds = TextVqaDataset(path="dataset")
+    ds = TextVqaDataset(path="/home/jovyan/vol-1/BREW-1146/data/TextVQA")
     sample = ds[100]
-    print(sample)
+    print(ds.decoder_tokenizer.batch_decode(sample["input_ids"]))
+    labels = [
+        tok_id if tok_id != -100 else ds.decoder_tokenizer.pad_token_id
+        for tok_id in sample["labels"]
+    ]
+    print(ds.decoder_tokenizer.batch_decode(labels))
+    print(ds.orc_text_tokenizer.batch_decode(sample["ocr_text_tensor"]))
+    print(sample["ocr_text_attention_mask"])
+    print(sample["ocr_bbox"])
 
     dl = DataLoader(
         ds,

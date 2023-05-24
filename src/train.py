@@ -1,10 +1,12 @@
 import argparse
+import os
 from pathlib import Path
 
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers.mlflow import MLFlowLogger
+from lightning.pytorch.loggers.tensorboard import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from src.models.lightning_module import LitVqaModel
@@ -14,6 +16,24 @@ from src.utils.datasets import CustomDataCollator, TextVqaDataset
 
 def setup_parser():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--pretrained_img_enc",
+        default="google/vit-base-patch16-224",
+        type=str,
+        help="pretrained_img_enc",
+    )
+    parser.add_argument(
+        "--pretrained_dec",
+        default="sshleifer/student-bart-base-3-3",
+        type=str,
+        help="pretrained_dec",
+    )
+    parser.add_argument(
+        "--pretrained_ocr_enc",
+        default="microsoft/layoutlm-base-uncased",
+        type=str,
+        help="pretrained_ocr_enc",
+    )
     parser.add_argument("--accelerator", default="gpu", type=str, help="accelerator")
     parser.add_argument(
         "--accumulate_grad_batches",
@@ -46,43 +66,78 @@ def setup_parser():
     parser.add_argument(
         "--val_batch_sizes", default=1, type=int, help="val_batch_sizes"
     )
-    parser.add_argument("--warmup_steps", default=500, type=int, help="warmup_steps")
+    parser.add_argument(
+        "--val_check_interval",
+        default=1.0,
+        type=float,
+        help="How often within one training epoch to check the validation set",
+    )
+    parser.add_argument("--warmup_steps", default=50, type=int, help="warmup_steps")
+    parser.add_argument("--fast_dev_run", default=False, type=bool, help="fast_dev_run")
     return parser
 
 
 if __name__ == "__main__":
     parser = setup_parser()
     args = parser.parse_args()
-    dataset = TextVqaDataset(path="dataset")
+    trn_dataset = TextVqaDataset(
+        path="/home/jovyan/vol-1/BREW-1146/data/TextVQA",
+        pretrained_vit=args.pretrained_img_enc,
+        pretrained_dec=args.pretrained_dec,
+        pretrained_ocr_enc=args.pretrained_ocr_enc,
+        mode="train",
+    )
+    val_dataset = TextVqaDataset(
+        path="/home/jovyan/vol-1/BREW-1146/data/TextVQA",
+        pretrained_vit=args.pretrained_img_enc,
+        pretrained_dec=trn_dataset.decoder_tokenizer,
+        pretrained_ocr_enc=args.pretrained_ocr_enc,
+        mode="val",
+    )
+
     train_loader = DataLoader(
-        dataset,
+        trn_dataset,
         batch_size=args.train_batch_sizes,
         shuffle=True,
-        collate_fn=CustomDataCollator(dataset.decoder_tokenizer),
+        collate_fn=CustomDataCollator(trn_dataset.decoder_tokenizer),
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.val_batch_sizes,
+        collate_fn=CustomDataCollator(trn_dataset.decoder_tokenizer),
     )
 
-    num_training_samples_per_epoch = len(dataset)
-
-    logger = MLFlowLogger(
-        experiment_name=args.exp_name,
-        tracking_uri=args.mlflow_tracking_uri,
-        save_dir=args.result_path,
-    )
+    num_training_samples_per_epoch = len(trn_dataset)
 
     lr_callback = LearningRateMonitor(logging_interval="step")
 
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_metric",
         dirpath=Path(args.result_path) / args.exp_name / args.exp_version,
-        filename="artifacts",
-        save_top_k=1,
-        save_last=False,
-        mode="min",
+    )
+    callbacks = [lr_callback, checkpoint_callback]
+
+    logger = (
+        MLFlowLogger(
+            run_name=args.exp_version,
+            experiment_name=args.exp_name,
+            tracking_uri=args.mlflow_tracking_uri,
+            save_dir=args.result_path,
+            log_model=False,
+        )
+        if args.mlflow_tracking_uri is not None
+        else TensorBoardLogger(save_dir=os.getcwd(), version=1, name="lightning_logs")
     )
 
     model = LitVqaModel(
-        {**vars(args), "num_training_samples_per_epoch": num_training_samples_per_epoch}
+        {
+            **vars(args),
+            "num_training_samples_per_epoch": num_training_samples_per_epoch,
+        },
+        trn_dataset.decoder_tokenizer,
     )
+
+    # pytorch 2.0 feature
+    # model = torch.compile(model)
 
     trainer = pl.Trainer(
         accelerator=args.accelerator,
@@ -91,5 +146,12 @@ if __name__ == "__main__":
         max_steps=args.max_steps,
         precision=args.precision,
         gradient_clip_val=args.gradient_clip_val,
+        fast_dev_run=args.fast_dev_run,
+        val_check_interval=args.val_check_interval,
+        logger=logger,
+        callbacks=callbacks,
+        limit_val_batches=10,
+        # overfit_batches=0.05
     )
-    trainer.fit(model=model, train_dataloaders=train_loader)
+
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)

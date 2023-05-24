@@ -10,26 +10,35 @@ from transformers import (
 )
 from transformers.file_utils import ModelOutput
 
-DEFAULT_PRETRAINED_BART = "sshleifer/tiny-mbart"
-DEFAULT_PRETRAINED_VIT = "google/vit-base-patch16-224"
-DEFAULT_PRETRAINED_LAYOUTLM = "microsoft/layoutlm-base-uncased"
-
 # TODO: OCR encoder, custom VisionEncoderDecoderModel that has vit, ocr encoder and bart decoder, \
 # custom processor to process ocr output text, input text and image
 
 
 class VQAModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        pretrained_img_enc: str,
+        pretrained_dec: str,
+        pretrained_ocr_enc: str,
+        dec_tokenizer: PreTrainedTokenizer,
+    ):
         super().__init__()
-        self.img_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_VIT)
-        self.ocr_encoder = AutoModel.from_pretrained(DEFAULT_PRETRAINED_LAYOUTLM)
+        self.img_encoder = AutoModel.from_pretrained(pretrained_img_enc)
+        self.ocr_encoder = AutoModel.from_pretrained(pretrained_ocr_enc)
         # TODO: intergrate with ocr_embedding
-        self.decoder = AutoModelForCausalLM.from_pretrained(DEFAULT_PRETRAINED_BART)
-        self.decoder_tokenizer = AutoTokenizer.from_pretrained(DEFAULT_PRETRAINED_BART)
+        self.decoder = AutoModelForCausalLM.from_pretrained(pretrained_dec)
+        self.decoder_tokenizer = dec_tokenizer
+        self.decoder.resize_token_embeddings(len(self.decoder_tokenizer))
+
         self.enc_to_dec_proj = torch.nn.Sequential(
             torch.nn.Linear(
                 self.ocr_encoder.config.hidden_size
                 + self.img_encoder.config.hidden_size,
+                self.decoder.config.hidden_size,
+            ),
+            torch.nn.ReLU(),
+            torch.nn.Linear(
+                self.decoder.config.hidden_size,
                 self.decoder.config.hidden_size,
             ),
             torch.nn.ReLU(),
@@ -66,7 +75,7 @@ class VQAModel(torch.nn.Module):
     def inference(
         self,
         image_tensors: torch.Tensor,
-        prompt_tensors: torch.Tensor,
+        decoder_input_ids: torch.Tensor,
         ocr_text_tensors: torch.Tensor,
         ocr_text_attention_mask: torch.Tensor,
         bbox_tensor: torch.Tensor,
@@ -90,14 +99,14 @@ class VQAModel(torch.nn.Module):
             encoder_outputs.last_hidden_state = (
                 encoder_outputs.last_hidden_state.unsqueeze(0)
             )
-        if len(prompt_tensors.size()) == 1:
-            prompt_tensors = prompt_tensors.unsqueeze(0)
+        if len(decoder_input_ids.size()) == 1:
+            decoder_input_ids = decoder_input_ids.unsqueeze(0)
 
         # get decoder output
         decoder_output = self.decoder.generate(
-            input_ids=prompt_tensors,
+            input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_outputs,
-            max_length=self.decoder.config.max_length,
+            max_length=64,
             early_stopping=True,
             use_cache=True,
             num_beams=1,
@@ -107,9 +116,7 @@ class VQAModel(torch.nn.Module):
 
         output = {"predictions": list()}
         for seq in decoder_tokenizer.batch_decode(decoder_output.sequences):
-            seq = seq.replace(decoder_tokenizer.eos_token, "").replace(
-                decoder_tokenizer.pad_token, ""
-            )
+            seq = seq.replace(decoder_tokenizer.pad_token, "")
             output["predictions"].append(seq)
 
         return output
@@ -119,13 +126,21 @@ if __name__ == "__main__":
     from PIL import Image
     from transformers import AutoImageProcessor, AutoTokenizer
 
+    DEFAULT_PRETRAINED_BART = "sshleifer/tiny-mbart"
+    DEFAULT_PRETRAINED_VIT = "google/vit-base-patch16-224"
+    DEFAULT_PRETRAINED_LAYOUTLM = "microsoft/layoutlm-base-uncased"
+
     # example image
     sample_image_path = "src/models/samples/iphone-14.jpeg"
     im = Image.open(sample_image_path)
     im = im.convert("RGB")
 
     # init model
-    model = VQAModel()
+    model = VQAModel(
+        pretrained_img_enc=DEFAULT_PRETRAINED_VIT,
+        pretrained_dec=DEFAULT_PRETRAINED_BART,
+        pretrained_ocr_enc=DEFAULT_PRETRAINED_LAYOUTLM,
+    )
 
     seq_length = model.img_encoder.embeddings.patch_embeddings.num_patches + 1
 
