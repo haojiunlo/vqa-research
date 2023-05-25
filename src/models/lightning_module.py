@@ -44,6 +44,7 @@ class LitVqaModel(pl.LightningModule):
         loss = self.model(
             image_tensors=batch["image"],
             decoder_input_ids=batch["input_ids"],
+            decoder_input_attention_mask=batch["attention_mask"],
             ocr_text_tensors=batch["ocr_text_tensor"],
             ocr_text_attention_mask=batch["ocr_text_attention_mask"],
             bbox=batch["ocr_bbox"],
@@ -56,6 +57,7 @@ class LitVqaModel(pl.LightningModule):
         preds = self.model.inference(
             image_tensors=batch["image"],
             decoder_input_ids=batch["input_ids"],
+            decoder_input_attention_mask=batch["attention_mask"],
             ocr_text_tensors=batch["ocr_text_tensor"],
             ocr_text_attention_mask=batch["ocr_text_attention_mask"],
             bbox_tensor=batch["ocr_bbox"],

@@ -1,9 +1,10 @@
 import json
 import os
 from collections import Counter
+from typing import Union
 
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoImageProcessor, AutoTokenizer
+from transformers import AutoImageProcessor, AutoTokenizer, PreTrainedTokenizer
 
 from src.datasets.collators import CustomDataCollator, collate_batch
 from src.datasets.common import OcrInfo, VqaSample, vqa_sample_2_tensor
@@ -15,7 +16,9 @@ class TextVqaDataset(Dataset):
         path: str,
         mode: str = "train",
         pretrained_vit: str = "google/vit-base-patch16-224",
-        pretrained_dec: str = "sshleifer/tiny-mbart",
+        pretrained_dec: Union[
+            PreTrainedTokenizer, str
+        ] = "sshleifer/student-bart-base-3-3",
         max_len: int = 128,
         pretrained_ocr_enc: str = "microsoft/layoutlm-base-uncased",
         hash_embed_n_tok: int = 6000,  # Number of rows in the embedding
@@ -36,7 +39,10 @@ class TextVqaDataset(Dataset):
 
         self.image_processor = AutoImageProcessor.from_pretrained(pretrained_vit)
 
-        self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        if isinstance(pretrained_dec, str):
+            self.decoder_tokenizer = AutoTokenizer.from_pretrained(pretrained_dec)
+        else:
+            self.decoder_tokenizer = pretrained_dec
         self.decoder_tokenizer.add_special_tokens(
             {
                 "additional_special_tokens": [
@@ -103,12 +109,16 @@ class TextVqaDataset(Dataset):
                     # FIXME -- make sure these are between 0 and 1000
                     OcrInfo(
                         x["word"],
-                        int(1000 * x["w"]) + 1,
-                        int(1000 * x["h"]) + 1,
-                        max(0, min(1000, int(1000 * x["x0"]))) + 1,
-                        max(0, min(1000, int(1000 * x["y0"]))) + 1,
-                        max(0, min(1000, int(1000 * x["x0"]) + int(1000 * x["w"]))) + 1,
-                        max(0, min(1000, int(1000 * x["y0"]) + int(1000 * x["h"]))) + 1,
+                        int(1000 * x["w"]),
+                        int(1000 * x["h"]),
+                        max(
+                            0, min(1000, int(1000 * x["x0"]))
+                        ),  # prevent index out of bounds
+                        max(0, min(1000, int(1000 * x["y0"]))),
+                        max(
+                            0, min(1000, int(1000 * x["x0"]) + int(1000 * x["w"]))
+                        ),  # prevent index out of bounds
+                        max(0, min(1000, int(1000 * x["y0"]) + int(1000 * x["h"]))),
                     )
                     for x in imgid2ocr.get(v["image_id"])
                 ],

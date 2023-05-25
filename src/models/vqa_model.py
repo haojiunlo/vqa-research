@@ -10,6 +10,10 @@ from transformers import (
 )
 from transformers.file_utils import ModelOutput
 
+from src.utils.custom_modeling_gpt_neo import (
+    GPTNeoForCausalLM as CustomGPTNeoForCausalLM,
+)
+
 # TODO: OCR encoder, custom VisionEncoderDecoderModel that has vit, ocr encoder and bart decoder, \
 # custom processor to process ocr output text, input text and image
 
@@ -26,7 +30,10 @@ class VQAModel(torch.nn.Module):
         self.img_encoder = AutoModel.from_pretrained(pretrained_img_enc)
         self.ocr_encoder = AutoModel.from_pretrained(pretrained_ocr_enc)
         # TODO: intergrate with ocr_embedding
-        self.decoder = AutoModelForCausalLM.from_pretrained(pretrained_dec)
+        if "gpt-neo" in pretrained_dec.lower():
+            self.decoder = CustomGPTNeoForCausalLM.from_pretrained(pretrained_dec)
+        else:
+            self.decoder = AutoModelForCausalLM.from_pretrained(pretrained_dec)
         self.decoder_tokenizer = dec_tokenizer
         self.decoder.resize_token_embeddings(len(self.decoder_tokenizer))
 
@@ -48,6 +55,7 @@ class VQAModel(torch.nn.Module):
         self,
         image_tensors: torch.Tensor,
         decoder_input_ids: torch.Tensor,
+        decoder_input_attention_mask: torch.Tensor,
         ocr_text_tensors: torch.Tensor,
         ocr_text_attention_mask: torch.Tensor,
         bbox: torch.Tensor,
@@ -67,6 +75,7 @@ class VQAModel(torch.nn.Module):
 
         decoder_outputs = self.decoder(
             input_ids=decoder_input_ids,
+            attention_mask=decoder_input_attention_mask,
             encoder_hidden_states=encoder_hidden_states,
             labels=decoder_labels,
         )
@@ -76,6 +85,7 @@ class VQAModel(torch.nn.Module):
         self,
         image_tensors: torch.Tensor,
         decoder_input_ids: torch.Tensor,
+        decoder_input_attention_mask: torch.Tensor,
         ocr_text_tensors: torch.Tensor,
         ocr_text_attention_mask: torch.Tensor,
         bbox_tensor: torch.Tensor,
@@ -105,6 +115,7 @@ class VQAModel(torch.nn.Module):
         # get decoder output
         decoder_output = self.decoder.generate(
             input_ids=decoder_input_ids,
+            attention_mask=decoder_input_attention_mask,
             encoder_hidden_states=encoder_outputs,
             max_length=64,
             early_stopping=True,
